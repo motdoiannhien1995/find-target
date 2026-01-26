@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
 
     <application
-        android:label="Fake Gps Trace Target"
+        android:label="Fake GPS Trace Target"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

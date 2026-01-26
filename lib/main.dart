@@ -84,37 +84,36 @@ class _MockAppState extends State<MockApp> {
     _loadData();
   }
 
-  // Hàm kiểm tra xem vị trí hiện tại đã được gán vào bất kỳ điểm P nào chưa
   bool _isAnyPUsingCurrentLocation() {
     if (myRealLocation == null) return false;
-    return beacons.any((b) => b.location != null && 
-        b.location!.latitude == myRealLocation!.latitude && 
-        b.location!.longitude == myRealLocation!.longitude);
+    for (var b in beacons) {
+      if (b.location != null) {
+        double distance = Geolocator.distanceBetween(
+          myRealLocation!.latitude, myRealLocation!.longitude,
+          b.location!.latitude, b.location!.longitude
+        );
+        if (distance < 100.0) return true; 
+      }
+    }
+    return false;
   }
 
   Future<void> _searchLocation() async {
     String query = _searchCtrl.text.trim();
     if (query.isEmpty) return;
-
     final coordRegExp = RegExp(r'^([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)$');
     final match = coordRegExp.firstMatch(query);
-
     if (match != null) {
       double lat = double.parse(match.group(1)!);
       double lng = double.parse(match.group(2)!);
       LatLng pos = LatLng(lat, lng);
       _mapController.move(pos, 15);
-      setState(() {
-        searchMarker = pos;
-        isSearchVisible = false;
-      });
+      setState(() { searchMarker = pos; isSearchVisible = false; });
       return;
     }
-
     try {
       final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
       final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp'});
-
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         if (data.isNotEmpty) {
@@ -122,18 +121,11 @@ class _MockAppState extends State<MockApp> {
           double lon = double.parse(data[0]['lon']);
           LatLng pos = LatLng(lat, lon);
           _mapController.move(pos, 15);
-          setState(() {
-            searchMarker = pos;
-            isSearchVisible = false;
-          });
+          setState(() { searchMarker = pos; isSearchVisible = false; });
           FocusScope.of(context).unfocus();
-        } else {
-          _showMsg("Không tìm thấy địa điểm");
-        }
+        } else { _showMsg("Không tìm thấy địa điểm"); }
       }
-    } catch (e) {
-      _showMsg("Lỗi kết nối");
-    }
+    } catch (e) { _showMsg("Lỗi kết nối"); }
   }
 
   Future<void> _saveData() async {
@@ -147,9 +139,7 @@ class _MockAppState extends State<MockApp> {
     String? encodedData = prefs.getString('saved_targets');
     if (encodedData != null) {
       Iterable l = jsonDecode(encodedData);
-      setState(() {
-        savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
-      });
+      setState(() { savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
     }
   }
 
@@ -160,23 +150,16 @@ class _MockAppState extends State<MockApp> {
       LatLng current = LatLng(p.latitude, p.longitude);
       setState(() => myRealLocation = current);
       _mapController.move(current, 15);
-      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
+      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5))
           .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
     }
   }
 
   Future<void> _openNavigation(LatLng destination) async {
-    Uri uri;
-    if (Platform.isAndroid) {
-      uri = Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}');
-    } else {
-      uri = Uri.parse('maps://?q=${destination.latitude},${destination.longitude}');
-    }
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      _showMsg("Không thể mở ứng dụng bản đồ");
-    }
+    Uri uri = Platform.isAndroid 
+      ? Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}')
+      : Uri.parse('maps://?q=${destination.latitude},${destination.longitude}');
+    if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
   List<double> _latLngToECEF(LatLng loc) {
@@ -284,7 +267,7 @@ class _MockAppState extends State<MockApp> {
     );
   }
 
-  void _confirmDeleteTarget(int index) {
+  void _confirmDeleteTarget(int index, {VoidCallback? onDeleted}) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -296,6 +279,7 @@ class _MockAppState extends State<MockApp> {
             setState(() => savedTargets.removeAt(index)); 
             _saveData();
             Navigator.pop(ctx); 
+            if (onDeleted != null) onDeleted();
           }, child: const Text("XÓA", style: TextStyle(color: Colors.white))),
         ],
       ),
@@ -322,13 +306,7 @@ class _MockAppState extends State<MockApp> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: Colors.blue),
-            SizedBox(width: 10),
-            Text("Hướng dẫn"),
-          ],
-        ),
+        title: const Row(children: [Icon(Icons.help_outline, color: Colors.blue), SizedBox(width: 10), Text("Hướng dẫn")]),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,13 +315,11 @@ class _MockAppState extends State<MockApp> {
               Text("1. Chọn Px rồi nhấn lên bản đồ để đặt vị trí."),
               Text("2. Nhấn icon tâm ngắm nhỏ cạnh Px để gán vị trí hiện tại."),
               Text("3. Nhập khoảng cách đo và nhấn 'TÍNH'."),
-              Text("4. Dùng icon assignment (sau khi TÍNH) để gán mục tiêu vào Px."),
+              Text("4. Dùng icon gán (assignment) để đưa kết quả vào Px."),
             ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK")),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
       ),
     );
   }
@@ -393,8 +369,7 @@ class _MockAppState extends State<MockApp> {
                           return IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), onPressed: () => setState(() => beacons.add(Beacon())));
                         }
                         return Container(
-                          width: 85,
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          width: 85, margin: const EdgeInsets.symmetric(horizontal: 4),
                           child: Column(
                             children: [
                               Row(
@@ -421,15 +396,12 @@ class _MockAppState extends State<MockApp> {
                                       ),
                                     ),
                                   ),
-                                  // Nút gán GPS thực: Chỉ hiện khi vị trí này chưa được dùng ở bất kỳ P nào
                                   if (!isCurrentLocInUse)
                                     InkWell(
                                       onTap: () {
                                         if (myRealLocation != null) {
                                           setState(() => beacons[i].location = myRealLocation);
                                           _showMsg("Đã gán GPS thực vào P${i+1}");
-                                        } else {
-                                          _showMsg("Chưa lấy được GPS!");
                                         }
                                       },
                                       child: const Padding(
@@ -447,32 +419,31 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  GestureDetector(
+                    onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
+                    child: Column(
+                      children: [
+                        Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15, color: Colors.red)),
+                        Text(accuracyInfo, style: const TextStyle(fontSize: 11, color: Colors.blueGrey, fontStyle: FontStyle.italic)),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 10),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
                         setState(() { beacons = [Beacon(), Beacon(), Beacon()]; targetPoint = null; searchMarker = null; resultDisplay = "0.000000, 0.000000"; accuracyInfo = "Residual: --"; });
                         _stopMock();
                       }),
-                      Expanded(
-                        child: GestureDetector(
-                          onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
-                          child: Column(
-                            children: [
-                              Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text(accuracyInfo, style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
-                            ],
-                          ),
-                        ),
-                      ),
                       if (targetPoint != null)
                         IconButton(icon: const Icon(Icons.directions, color: Colors.orange), onPressed: () => _openNavigation(targetPoint!)),
                       if (targetPoint != null)
                         PopupMenuButton<int>(
                           icon: const Icon(Icons.assignment_returned, color: Colors.blue),
-                          tooltip: "Gán mục tiêu vào Px",
                           onSelected: (idx) {
-                            setState(() => beacons[idx].location = targetPoint);
-                            _showMsg("Đã gán mục tiêu vào P${idx+1}");
+                             setState(() => beacons[idx].location = targetPoint);
+                             _showMsg("Đã gán mục tiêu vào P${idx+1}");
                           },
                           itemBuilder: (ctx) => List.generate(beacons.length, (idx) => PopupMenuItem(value: idx, child: Text("Gán vào P${idx+1}"))),
                         ),
@@ -480,9 +451,13 @@ class _MockAppState extends State<MockApp> {
                         IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
                       IconButton(
                         onPressed: (targetPoint == null && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { if (targetPoint != null) _setMock(targetPoint!.latitude, targetPoint!.longitude, fromTarget: true); }),
-                        icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 30),
+                        icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
                       ),
-                      ElevatedButton(onPressed: _calculateTrilateration, child: const Text("TÍNH")),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                        onPressed: _calculateTrilateration, 
+                        child: const Text("TÍNH", style: TextStyle(fontWeight: FontWeight.bold))
+                      ),
                     ],
                   ),
                 ],
@@ -527,7 +502,7 @@ class _MockAppState extends State<MockApp> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                       decoration: BoxDecoration(color: Colors.black.withOpacity(0.75), borderRadius: BorderRadius.circular(3)),
-                                      child: Text(savedTargets[i].name, style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                                      child: Text(savedTargets[i].name, style: const TextStyle(color: Colors.white, fontSize: 8), overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -537,35 +512,19 @@ class _MockAppState extends State<MockApp> {
                       ),
                     ],
                   ),
-
                   if (isSearchVisible)
                     Positioned(
                       top: 10, left: 15, right: 15,
                       child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(30),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 2))],
-                        ),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8)]),
                         child: TextField(
-                          controller: _searchCtrl,
-                          autofocus: true,
-                          decoration: InputDecoration(
-                            hintText: "Tìm địa chỉ hoặc tọa độ...",
-                            hintStyle: const TextStyle(fontSize: 14),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            prefixIcon: const Icon(Icons.search, color: Colors.blue),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.close, color: Colors.grey),
-                              onPressed: () => setState(() => isSearchVisible = false),
-                            ),
-                          ),
+                          controller: _searchCtrl, 
+                          autofocus: true, 
+                          decoration: InputDecoration(hintText: "Tìm kiếm...", border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), prefixIcon: const Icon(Icons.search, color: Colors.blue), suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => isSearchVisible = false))),
                           onSubmitted: (_) => _searchLocation(),
                         ),
                       ),
                     ),
-
                   Positioned(
                     right: 15, bottom: 15,
                     child: Row(
@@ -573,11 +532,7 @@ class _MockAppState extends State<MockApp> {
                         if (savedTargets.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(right: 10),
-                            child: FloatingActionButton(
-                              heroTag: "listBtn", mini: true, backgroundColor: Colors.purple,
-                              onPressed: () => _showSavedTargetsSheet(),
-                              child: const Icon(Icons.list, color: Colors.white),
-                            ),
+                            child: FloatingActionButton(heroTag: "listBtn", mini: true, backgroundColor: Colors.purple, onPressed: _showSavedTargetsSheet, child: const Icon(Icons.list, color: Colors.white)),
                           ),
                         FloatingActionButton(
                           heroTag: "locBtn", mini: true, backgroundColor: Colors.white,
@@ -608,9 +563,17 @@ class _MockAppState extends State<MockApp> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text("Tọa độ (Nhấn giữ để copy):", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 5),
             GestureDetector(
-              onLongPress: () { Clipboard.setData(ClipboardData(text: coords)); _showMsg("Đã copy tọa độ!"); },
-              child: Container(padding: const EdgeInsets.all(8), color: Colors.grey.shade100, child: Text("Tọa độ: $coords", style: const TextStyle(fontFamily: 'monospace'))),
+              onLongPress: () {
+                Clipboard.setData(ClipboardData(text: coords));
+                _showMsg("Đã copy tọa độ!");
+              },
+              child: Text(
+                coords,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.red),
+              ),
             ),
           ],
         ),
@@ -626,8 +589,7 @@ class _MockAppState extends State<MockApp> {
 
   void _showSavedTargetsSheet() {
     showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
+      context: context, isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(15))),
       builder: (ctx) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
@@ -635,31 +597,19 @@ class _MockAppState extends State<MockApp> {
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Column(
             children: [
-              const Text("DANH SÁCH MỤC TIÊU", style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text("MỤC TIÊU ĐÃ LƯU", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const Divider(),
               Expanded(
-                child: ReorderableListView.builder(
+                child: ListView.builder(
                   itemCount: savedTargets.length,
-                  onReorder: (oldIdx, newIdx) {
-                    setState(() {
-                      if (newIdx > oldIdx) newIdx -= 1;
-                      final item = savedTargets.removeAt(oldIdx);
-                      savedTargets.insert(newIdx, item);
-                      _saveData();
-                    });
-                    setSheetState(() {});
-                  },
                   itemBuilder: (c, i) => ListTile(
                     key: ValueKey(savedTargets[i].id),
-                    leading: const Icon(Icons.location_on, color: Colors.purple, size: 20),
-                    title: Text(savedTargets[i].name, style: const TextStyle(fontSize: 14)),
-                    subtitle: Text("${savedTargets[i].location.latitude.toStringAsFixed(6)}, ${savedTargets[i].location.longitude.toStringAsFixed(6)}", style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.blueGrey)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(icon: const Icon(Icons.directions, color: Colors.orange, size: 20), onPressed: () => _openNavigation(savedTargets[i].location)),
-                        const Icon(Icons.drag_handle, color: Colors.grey),
-                      ],
+                    leading: const Icon(Icons.location_on, color: Colors.purple),
+                    title: Text(savedTargets[i].name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text("${savedTargets[i].location.latitude.toStringAsFixed(6)}, ${savedTargets[i].location.longitude.toStringAsFixed(6)}"),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _confirmDeleteTarget(i, onDeleted: () => setSheetState(() {})),
                     ),
                     onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
                   ),
