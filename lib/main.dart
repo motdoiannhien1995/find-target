@@ -107,10 +107,9 @@ class _MockAppState extends State<MockApp> {
       double fZ = p1[2] + xVal*ex[2] + yVal*ey[2] + zVal*ez[2];
 
       LatLng result = _ecefToLatLng(fX, fY, fZ);
-
-      // Nới lỏng giới hạn an toàn lên 2000km để tránh bay ra đại dương quá xa khi nhập sai
-      double distCheck = Geolocator.distanceBetween(points[0]!.latitude, points[0]!.longitude, result.latitude, result.longitude);
-      if (distCheck > 2000000) throw "Kết quả vượt quá 2000km, vui lòng kiểm tra lại số liệu!";
+      
+      // Kiểm tra giá trị hợp lệ (NaN xảy ra khi các cầu không giao nhau)
+      if (result.latitude.isNaN || result.longitude.isNaN) throw "Dữ liệu phi lý, các điểm không giao nhau!";
 
       setState(() {
         targetPoint = result;
@@ -121,9 +120,9 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg(e.toString()); }
   }
 
-  // --- GIAO DIỆN ---
+  // --- GIAO DIỆN & TÍNH NĂNG ---
 
-  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.redAccent));
+  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.blueGrey));
 
   Future<void> _requestPermission() async {
     var status = await [Permission.location, Permission.locationWhenInUse].request();
@@ -135,9 +134,7 @@ class _MockAppState extends State<MockApp> {
 
   Future<void> _getCurrentLocation() async {
     Position p = await Geolocator.getCurrentPosition();
-    LatLng current = LatLng(p.latitude, p.longitude);
-    setState(() => myRealLocation = current);
-    _mapController.move(current, 15);
+    _mapController.move(LatLng(p.latitude, p.longitude), 15);
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
@@ -217,7 +214,22 @@ class _MockAppState extends State<MockApp> {
                         setState(() { points = [null,null,null]; targetPoint = null; resultDisplay = "0.000000, 0.000000"; isCalculated = false; });
                         _stopMock();
                       }),
-                      Expanded(child: Center(child: Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)))),
+                      Expanded(
+                        child: GestureDetector(
+                          onLongPress: () {
+                            Clipboard.setData(ClipboardData(text: resultDisplay));
+                            _showMsg("Đã copy tọa độ mục tiêu!");
+                          },
+                          child: Center(child: Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold))),
+                        ),
+                      ),
+                      // NÚT GÁN TỌA ĐỘ MỤC TIÊU VÀO P1, P2, P3
+                      if (targetPoint != null)
+                        PopupMenuButton<int>(
+                          icon: const Icon(Icons.assignment_returned, color: Colors.blue),
+                          onSelected: (i) => setState(() { points[i] = targetPoint; }),
+                          itemBuilder: (ctx) => [0, 1, 2].map((i) => PopupMenuItem(value: i, child: Text("Gán vào P${i+1}"))).toList(),
+                        ),
                       IconButton(
                         onPressed: (targetPoint == null && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { if (targetPoint != null) _setMock(targetPoint!.latitude, targetPoint!.longitude, fromTarget: true); }),
                         icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 34),
@@ -251,14 +263,7 @@ class _MockAppState extends State<MockApp> {
                           for (int i = 0; i < 3; i++)
                             if (points[i] != null)
                               Marker(point: points[i]!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))))),
-                          
-                          // ICON MỤC TIÊU CŨ NHƯNG THU NHỎ (Size 30)
-                          if (targetPoint != null) 
-                            Marker(
-                              point: targetPoint!, 
-                              width: 30, height: 30, 
-                              child: const Icon(Icons.location_searching, color: Colors.orange, size: 30)
-                            ),
+                          if (targetPoint != null) Marker(point: targetPoint!, width: 30, height: 30, child: const Icon(Icons.location_searching, color: Colors.orange, size: 30)),
                         ],
                       ),
                     ],
