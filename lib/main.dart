@@ -8,7 +8,6 @@ import 'dart:math';
 
 void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
 
-// Class quản lý từng điểm mốc (Beacon)
 class Beacon {
   LatLng? location;
   final TextEditingController controller;
@@ -25,9 +24,7 @@ class _MockAppState extends State<MockApp> {
   static const platform = MethodChannel('com.example.mock/gps');
   final MapController _mapController = MapController();
   
-  // 1. GIỮ NGUYÊN DANH SÁCH ĐIỂM (Khởi tạo sẵn 3 điểm như cũ nhưng cho phép thêm)
   List<Beacon> beacons = [Beacon(), Beacon(), Beacon()];
-  
   String selectedUnit = 'm'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
 
@@ -38,68 +35,98 @@ class _MockAppState extends State<MockApp> {
   String accuracyInfo = "Residual: --";
   bool isMockingTarget = false;
 
+  // Hằng số WGS84 cho chuyển đổi ECEF
+  static const double WGS84_A = 6378137.0;
+  static const double WGS84_B = 6356752.314245;
+  static const double E2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
+
   @override
   void initState() {
     super.initState();
     _requestPermission();
   }
 
-  // --- ENGINE ĐỊNH VỊ TỐI ƯU HÓA (NON-LINEAR LEAST SQUARES) ---
+  // --- CHUYỂN ĐỔI HỆ TỌA ĐỘ CHUYÊN NGHIỆP ---
+
+  List<double> _latLngToECEF(LatLng loc) {
+    double lat = loc.latitude * pi / 180;
+    double lon = loc.longitude * pi / 180;
+    double N = WGS84_A / sqrt(1 - E2 * pow(sin(lat), 2));
+    return [
+      N * cos(lat) * cos(lon),
+      N * cos(lat) * sin(lon),
+      (N * (1 - E2)) * sin(lat)
+    ];
+  }
+
+  LatLng _ecefToLatLng(double x, double y, double z) {
+    double lon = atan2(y, x);
+    double p = sqrt(x * x + y * y);
+    double lat = atan2(z, p * (1 - E2));
+    for (int i = 0; i < 5; i++) {
+      double N = WGS84_A / sqrt(1 - E2 * pow(sin(lat), 2));
+      lat = atan2(z + E2 * N * sin(lat), p);
+    }
+    return LatLng(lat * 180 / pi, lon * 180 / pi);
+  }
+
+  // --- ENGINE TỐI ƯU HÓA TRONG KHÔNG GIAN MÉT ---
 
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
-    
-    // Lấy các điểm đã nhập đủ dữ liệu
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
     
     if (validBeacons.length < 3) {
-      _showMsg("Cần ít nhất 3 điểm (P1, P2, P3...) để tính toán!");
+      _showMsg("Cần ít nhất 3 điểm để định vị chính xác!");
       return;
     }
 
     try {
-      // 1. Điểm đoán ban đầu (Trọng tâm các beacon)
-      double avgLat = validBeacons.map((e) => e.location!.latitude).reduce((a, b) => a + b) / validBeacons.length;
-      double avgLng = validBeacons.map((e) => e.location!.longitude).reduce((a, b) => a + b) / validBeacons.length;
-      LatLng estimate = LatLng(avgLat, avgLng);
+      // 1. Khởi tạo điểm đoán ban đầu trong ECEF
+      List<double> est = [0, 0, 0];
+      for (var b in validBeacons) {
+        var p = _latLngToECEF(b.location!);
+        est[0] += p[0]; est[1] += p[1]; est[2] += p[2];
+      }
+      est = est.map((e) => e / validBeacons.length).toList();
 
-      // 2. Thuật toán Gauss-Newton (Lặp để giảm sai số bình phương)
-      for (int iteration = 0; iteration < 50; iteration++) {
-        double dLat = 0, dLng = 0;
-        double totalWeight = 0;
-
+      // 2. Vòng lặp Gauss-Newton (Tối ưu hóa Gradient Descent trong hệ mét)
+      for (int iter = 0; iter < 40; iter++) {
+        double dx = 0, dy = 0, dz = 0;
         for (var b in validBeacons) {
+          var p = _latLngToECEF(b.location!);
           double r_measured = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-          double r_calc = Geolocator.distanceBetween(estimate.latitude, estimate.longitude, b.location!.latitude, b.location!.longitude);
-          
-          if (r_calc < 0.1) continue; 
 
-          double error = r_measured - r_calc;
-          // Gradient hướng tới beacon
-          double latStep = (estimate.latitude - b.location!.latitude) / r_calc;
-          double lngStep = (estimate.longitude - b.location!.longitude) / r_calc;
+          double vx = est[0] - p[0];
+          double vy = est[1] - p[1];
+          double vz = est[2] - p[2];
+          double dist = sqrt(vx * vx + vy * vy + vz * vz);
 
-          dLat += error * latStep;
-          dLng += error * lngStep;
-          totalWeight += 1.0;
+          if (dist < 0.1) continue;
+
+          double error = dist - r_measured;
+          // Gradient hướng chuẩn trong không gian 3D
+          dx += error * (vx / dist);
+          dy += error * (vy / dist);
+          dz += error * (vz / dist);
         }
 
-        // Cập nhật vị trí (Learning rate 0.1 để mượt mà)
-        estimate = LatLng(
-          estimate.latitude + (dLat / totalWeight) * 0.1,
-          estimate.longitude + (dLng / totalWeight) * 0.1
-        );
+        // Cập nhật tọa độ ECEF (Learning rate 0.2 giúp hội tụ nhanh và ổn định)
+        est[0] -= (dx / validBeacons.length) * 0.2;
+        est[1] -= (dy / validBeacons.length) * 0.2;
+        est[2] -= (dz / validBeacons.length) * 0.2;
       }
 
-      // 3. Tính Residual (Độ tin cậy)
-      double residual = _calculateResidual(estimate, validBeacons);
+      // 3. Chuyển ngược về LatLng để hiển thị
+      LatLng finalRes = _ecefToLatLng(est[0], est[1], est[2]);
+      double residual = _calculateResidual(finalRes, validBeacons);
 
       setState(() {
-        targetPoint = estimate;
-        resultDisplay = "${estimate.latitude.toStringAsFixed(6)}, ${estimate.longitude.toStringAsFixed(6)}";
+        targetPoint = finalRes;
+        resultDisplay = "${finalRes.latitude.toStringAsFixed(6)}, ${finalRes.longitude.toStringAsFixed(6)}";
         accuracyInfo = "Sai số TB: ±${residual.toStringAsFixed(1)}m";
       });
-      _mapController.move(estimate, 15);
+      _mapController.move(finalRes, 15);
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
@@ -113,7 +140,7 @@ class _MockAppState extends State<MockApp> {
     return sqrt(sumSq / validOnes.length);
   }
 
-  // --- GIAO DIỆN & MOCK GPS (GIỮ NGUYÊN 100%) ---
+  // --- GIAO DIỆN & MOCK GPS (FULL 100% TÍNH NĂNG) ---
 
   void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.redAccent));
 
@@ -148,7 +175,6 @@ class _MockAppState extends State<MockApp> {
       body: SafeArea(
         child: Column(
           children: [
-            // PANEL ĐIỀU KHIỂN (Full tính năng cũ + Nút Add)
             Container(
               padding: const EdgeInsets.all(8), color: Colors.white,
               child: Column(
@@ -161,7 +187,6 @@ class _MockAppState extends State<MockApp> {
                     )).toList(),
                   ),
                   const SizedBox(height: 8),
-                  // DANH SÁCH ĐIỂM NGANG (Có thể cuộn nếu nhiều điểm)
                   SizedBox(
                     height: 70,
                     child: ListView.builder(
@@ -204,7 +229,6 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // THANH CÔNG CỤ (Copy, Gán, Tính toán)
                   Row(
                     children: [
                       IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
@@ -238,7 +262,6 @@ class _MockAppState extends State<MockApp> {
                 ],
               ),
             ),
-            // MAP (GIỮ NGUYÊN LOGIC HIỂN THỊ)
             Expanded(
               child: Stack(
                 children: [
