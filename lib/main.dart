@@ -5,6 +5,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
 
@@ -12,6 +14,26 @@ class Beacon {
   LatLng? location;
   final TextEditingController controller;
   Beacon({this.location, String dist = ""}) : controller = TextEditingController(text: dist);
+}
+
+class SavedTarget {
+  LatLng location;
+  String name;
+  final DateTime timestamp;
+  SavedTarget({required this.location, required this.name, required this.timestamp});
+
+  Map<String, dynamic> toJson() => {
+    'lat': location.latitude,
+    'lng': location.longitude,
+    'name': name,
+    'time': timestamp.toIso8601String(),
+  };
+
+  factory SavedTarget.fromJson(Map<String, dynamic> json) => SavedTarget(
+    location: LatLng(json['lat'], json['lng']),
+    name: json['name'],
+    timestamp: DateTime.parse(json['time']),
+  );
 }
 
 class MockApp extends StatefulWidget {
@@ -25,6 +47,7 @@ class _MockAppState extends State<MockApp> {
   final MapController _mapController = MapController();
   
   List<Beacon> beacons = [Beacon(), Beacon(), Beacon()];
+  List<SavedTarget> savedTargets = [];
   String selectedUnit = 'm'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
 
@@ -35,7 +58,6 @@ class _MockAppState extends State<MockApp> {
   String accuracyInfo = "Residual: --";
   bool isMockingTarget = false;
 
-  // Hằng số WGS84 cho chuyển đổi ECEF
   static const double WGS84_A = 6378137.0;
   static const double WGS84_B = 6356752.314245;
   static const double E2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
@@ -43,20 +65,44 @@ class _MockAppState extends State<MockApp> {
   @override
   void initState() {
     super.initState();
-    _requestPermission();
+    _initLocation();
+    _loadData();
   }
 
-  // --- CHUYỂN ĐỔI HỆ TỌA ĐỘ CHUYÊN NGHIỆP ---
+  Future<void> _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    String encodedData = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
+    await prefs.setString('saved_targets', encodedData);
+  }
+
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? encodedData = prefs.getString('saved_targets');
+    if (encodedData != null) {
+      Iterable l = jsonDecode(encodedData);
+      setState(() {
+        savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
+      });
+    }
+  }
+
+  Future<void> _initLocation() async {
+    var status = await [Permission.location].request();
+    if (status[Permission.location]!.isGranted) {
+      Position p = await Geolocator.getCurrentPosition();
+      LatLng current = LatLng(p.latitude, p.longitude);
+      setState(() => myRealLocation = current);
+      _mapController.move(current, 15);
+      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
+          .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
+    }
+  }
 
   List<double> _latLngToECEF(LatLng loc) {
     double lat = loc.latitude * pi / 180;
     double lon = loc.longitude * pi / 180;
     double N = WGS84_A / sqrt(1 - E2 * pow(sin(lat), 2));
-    return [
-      N * cos(lat) * cos(lon),
-      N * cos(lat) * sin(lon),
-      (N * (1 - E2)) * sin(lat)
-    ];
+    return [N * cos(lat) * cos(lon), N * cos(lat) * sin(lon), (N * (1 - E2)) * sin(lat)];
   }
 
   LatLng _ecefToLatLng(double x, double y, double z) {
@@ -70,57 +116,37 @@ class _MockAppState extends State<MockApp> {
     return LatLng(lat * 180 / pi, lon * 180 / pi);
   }
 
-  // --- ENGINE TỐI ƯU HÓA TRONG KHÔNG GIAN MÉT ---
-
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
-    
     if (validBeacons.length < 3) {
-      _showMsg("Cần ít nhất 3 điểm để định vị chính xác!");
+      _showMsg("Cần ít nhất 3 điểm!");
       return;
     }
-
     try {
-      // 1. Khởi tạo điểm đoán ban đầu trong ECEF
       List<double> est = [0, 0, 0];
       for (var b in validBeacons) {
         var p = _latLngToECEF(b.location!);
         est[0] += p[0]; est[1] += p[1]; est[2] += p[2];
       }
       est = est.map((e) => e / validBeacons.length).toList();
-
-      // 2. Vòng lặp Gauss-Newton (Tối ưu hóa Gradient Descent trong hệ mét)
       for (int iter = 0; iter < 40; iter++) {
         double dx = 0, dy = 0, dz = 0;
         for (var b in validBeacons) {
           var p = _latLngToECEF(b.location!);
           double r_measured = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-
-          double vx = est[0] - p[0];
-          double vy = est[1] - p[1];
-          double vz = est[2] - p[2];
+          double vx = est[0] - p[0]; double vy = est[1] - p[1]; double vz = est[2] - p[2];
           double dist = sqrt(vx * vx + vy * vy + vz * vz);
-
           if (dist < 0.1) continue;
-
           double error = dist - r_measured;
-          // Gradient hướng chuẩn trong không gian 3D
-          dx += error * (vx / dist);
-          dy += error * (vy / dist);
-          dz += error * (vz / dist);
+          dx += error * (vx / dist); dy += error * (vy / dist); dz += error * (vz / dist);
         }
-
-        // Cập nhật tọa độ ECEF (Learning rate 0.2 giúp hội tụ nhanh và ổn định)
         est[0] -= (dx / validBeacons.length) * 0.2;
         est[1] -= (dy / validBeacons.length) * 0.2;
         est[2] -= (dz / validBeacons.length) * 0.2;
       }
-
-      // 3. Chuyển ngược về LatLng để hiển thị
       LatLng finalRes = _ecefToLatLng(est[0], est[1], est[2]);
       double residual = _calculateResidual(finalRes, validBeacons);
-
       setState(() {
         targetPoint = finalRes;
         resultDisplay = "${finalRes.latitude.toStringAsFixed(6)}, ${finalRes.longitude.toStringAsFixed(6)}";
@@ -140,17 +166,65 @@ class _MockAppState extends State<MockApp> {
     return sqrt(sumSq / validOnes.length);
   }
 
-  // --- GIAO DIỆN & MOCK GPS (FULL 100% TÍNH NĂNG) ---
-
-  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.redAccent));
-
-  Future<void> _requestPermission() async {
-    var status = await [Permission.location].request();
-    if (status[Permission.location]!.isGranted) {
-      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
-          .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
-    }
+  void _saveCurrentTarget() {
+    if (targetPoint == null) return;
+    TextEditingController nameCtrl = TextEditingController(text: "Mục tiêu ${savedTargets.length + 1}");
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Lưu điểm mục tiêu"),
+        content: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Tên điểm")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
+          ElevatedButton(onPressed: () {
+            setState(() => savedTargets.add(SavedTarget(location: targetPoint!, name: nameCtrl.text, timestamp: DateTime.now())));
+            _saveData();
+            Navigator.pop(ctx);
+            _showMsg("Đã lưu!");
+          }, child: const Text("LƯU")),
+        ],
+      ),
+    );
   }
+
+  void _editTargetName(int index) {
+    TextEditingController editCtrl = TextEditingController(text: savedTargets[index].name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Đổi tên"),
+        content: TextField(controller: editCtrl, decoration: const InputDecoration(labelText: "Tên mới")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
+          ElevatedButton(onPressed: () {
+            setState(() => savedTargets[index].name = editCtrl.text);
+            _saveData();
+            Navigator.pop(ctx);
+          }, child: const Text("OK")),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteTarget(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Xác nhận xóa"),
+        content: Text("Xóa '${savedTargets[index].name}'?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("KHÔNG")),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red), onPressed: () { 
+            setState(() => savedTargets.removeAt(index)); 
+            _saveData();
+            Navigator.pop(ctx); 
+          }, child: const Text("XÓA", style: TextStyle(color: Colors.white))),
+        ],
+      ),
+    );
+  }
+
+  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 1)));
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     try {
@@ -169,7 +243,6 @@ class _MockAppState extends State<MockApp> {
   @override
   Widget build(BuildContext context) {
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
-
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: SafeArea(
@@ -197,8 +270,7 @@ class _MockAppState extends State<MockApp> {
                           return IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), onPressed: () => setState(() => beacons.add(Beacon())));
                         }
                         return Container(
-                          width: 70,
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          width: 70, margin: const EdgeInsets.symmetric(horizontal: 4),
                           child: Column(
                             children: [
                               GestureDetector(
@@ -237,7 +309,7 @@ class _MockAppState extends State<MockApp> {
                       }),
                       Expanded(
                         child: GestureDetector(
-                          onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy tọa độ!"); },
+                          onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
                           child: Column(
                             children: [
                               Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13)),
@@ -252,6 +324,8 @@ class _MockAppState extends State<MockApp> {
                           onSelected: (i) => setState(() => beacons[i].location = targetPoint),
                           itemBuilder: (ctx) => List.generate(beacons.length, (index) => PopupMenuItem(value: index, child: Text("Gán vào P${index+1}"))),
                         ),
+                      if (targetPoint != null)
+                        IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
                       IconButton(
                         onPressed: (targetPoint == null && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { if (targetPoint != null) _setMock(targetPoint!.latitude, targetPoint!.longitude, fromTarget: true); }),
                         icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 30),
@@ -281,24 +355,115 @@ class _MockAppState extends State<MockApp> {
                       TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
                       MarkerLayer(
                         markers: [
-                          if (myRealLocation != null) Marker(point: myRealLocation!, width: 20, height: 20, child: const CircleAvatar(backgroundColor: Colors.blue, radius: 5)),
+                          if (myRealLocation != null) Marker(point: myRealLocation!, width: 20, height: 20, child: const CircleAvatar(backgroundColor: Colors.blue, radius: 4)),
                           for (int i = 0; i < beacons.length; i++)
                             if (beacons[i].location != null)
                               Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
-                          if (targetPoint != null) Marker(point: targetPoint!, width: 30, height: 30, child: const Icon(Icons.location_searching, color: Colors.orange, size: 30)),
+                          if (targetPoint != null) Marker(point: targetPoint!, width: 25, height: 25, child: const Icon(Icons.location_searching, color: Colors.orange, size: 25)),
+                          
+                          // Marker mục tiêu đã lưu (Nhỏ gọn & Nền tối)
+                          for (int i = 0; i < savedTargets.length; i++)
+                            Marker(
+                              point: savedTargets[i].location,
+                              width: 70, height: 60,
+                              child: GestureDetector(
+                                onTap: () => _showTargetOptions(i),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.bookmark, color: Colors.purple, size: 20), // Icon nhỏ hơn
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.75), // Nền màu tối
+                                        borderRadius: BorderRadius.circular(3)
+                                      ),
+                                      child: Text(
+                                        savedTargets[i].name, 
+                                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w500), // Chữ trắng nhỏ
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ],
                   ),
-                  Positioned(right: 15, bottom: 15, child: FloatingActionButton(mini: true, backgroundColor: Colors.white, onPressed: () async {
-                    Position p = await Geolocator.getCurrentPosition();
-                    _mapController.move(LatLng(p.latitude, p.longitude), 15);
-                  }, child: const Icon(Icons.my_location, color: Colors.blue))),
+                  Positioned(
+                    right: 15, bottom: 15,
+                    child: Row(
+                      children: [
+                        if (savedTargets.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: FloatingActionButton(
+                              heroTag: "listBtn", mini: true, backgroundColor: Colors.purple,
+                              onPressed: () => _showSavedTargetsSheet(),
+                              child: const Icon(Icons.list, color: Colors.white),
+                            ),
+                          ),
+                        FloatingActionButton(
+                          heroTag: "locBtn", mini: true, backgroundColor: Colors.white,
+                          onPressed: () async {
+                            Position p = await Geolocator.getCurrentPosition();
+                            _mapController.move(LatLng(p.latitude, p.longitude), 15);
+                          }, child: const Icon(Icons.my_location, color: Colors.blue),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showTargetOptions(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(savedTargets[index].name),
+        content: Text("Tọa độ: ${savedTargets[index].location.latitude.toStringAsFixed(6)}, ${savedTargets[index].location.longitude.toStringAsFixed(6)}"),
+        actions: [
+          IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(ctx); _editTargetName(index); }),
+          IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG")),
+        ],
+      ),
+    );
+  }
+
+  void _showSavedTargetsSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(15))),
+      builder: (ctx) => Column(
+        children: [
+          const Padding(padding: EdgeInsets.all(10), child: Text("DANH SÁCH MỤC TIÊU", style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(
+            child: ListView.builder(
+              itemCount: savedTargets.length,
+              itemBuilder: (c, i) => ListTile(
+                leading: const Icon(Icons.location_on, color: Colors.purple, size: 20),
+                title: Text(savedTargets[i].name, style: const TextStyle(fontSize: 14)),
+                subtitle: Text("${savedTargets[i].location.latitude.toStringAsFixed(4)}, ${savedTargets[i].location.longitude.toStringAsFixed(4)}", style: const TextStyle(fontSize: 12)),
+                trailing: Wrap(
+                  children: [
+                    IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 20), onPressed: () { Navigator.pop(ctx); _editTargetName(i); }),
+                    IconButton(icon: const Icon(Icons.delete, color: Colors.red, size: 20), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(i); }),
+                  ],
+                ),
+                onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
