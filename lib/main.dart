@@ -22,7 +22,13 @@ class _MockAppState extends State<MockApp> {
   final List<TextEditingController> dists = List.generate(3, (i) => TextEditingController(text: ""));
   
   String selectedUnit = 'ft'; 
-  final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0};
+  // Thêm đơn vị mi (1 dặm = 1609.34 mét)
+  final Map<String, double> unitToMeter = {
+    'ft': 0.3048, 
+    'm': 1.0, 
+    'km': 1000.0,
+    'mi': 1609.34
+  };
 
   int? selectedIndex; 
   LatLng? targetPoint;
@@ -107,9 +113,6 @@ class _MockAppState extends State<MockApp> {
       double fZ = p1[2] + xVal*ex[2] + yVal*ey[2] + zVal*ez[2];
 
       LatLng result = _ecefToLatLng(fX, fY, fZ);
-      
-      // Kiểm tra giá trị hợp lệ (NaN xảy ra khi các cầu không giao nhau)
-      if (result.latitude.isNaN || result.longitude.isNaN) throw "Dữ liệu phi lý, các điểm không giao nhau!";
 
       setState(() {
         targetPoint = result;
@@ -120,9 +123,9 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg(e.toString()); }
   }
 
-  // --- GIAO DIỆN & TÍNH NĂNG ---
+  // --- GIAO DIỆN & TIỆN ÍCH ---
 
-  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.blueGrey));
+  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.redAccent));
 
   Future<void> _requestPermission() async {
     var status = await [Permission.location, Permission.locationWhenInUse].request();
@@ -134,7 +137,9 @@ class _MockAppState extends State<MockApp> {
 
   Future<void> _getCurrentLocation() async {
     Position p = await Geolocator.getCurrentPosition();
-    _mapController.move(LatLng(p.latitude, p.longitude), 15);
+    LatLng current = LatLng(p.latitude, p.longitude);
+    setState(() => myRealLocation = current);
+    _mapController.move(current, 15);
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
@@ -164,9 +169,13 @@ class _MockAppState extends State<MockApp> {
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: ['ft', 'm', 'km'].map((unit) => Padding(
+                    children: ['ft', 'm', 'km', 'mi'].map((unit) => Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(label: Text(unit), selected: selectedUnit == unit, onSelected: (val) => setState(() => selectedUnit = unit)),
+                      child: ChoiceChip(
+                        label: Text(unit), 
+                        selected: selectedUnit == unit, 
+                        onSelected: (val) => setState(() => selectedUnit = unit)
+                      ),
                     )).toList(),
                   ),
                   const SizedBox(height: 8),
@@ -223,7 +232,6 @@ class _MockAppState extends State<MockApp> {
                           child: Center(child: Text(resultDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold))),
                         ),
                       ),
-                      // NÚT GÁN TỌA ĐỘ MỤC TIÊU VÀO P1, P2, P3
                       if (targetPoint != null)
                         PopupMenuButton<int>(
                           icon: const Icon(Icons.assignment_returned, color: Colors.blue),
