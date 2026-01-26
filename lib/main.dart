@@ -246,6 +246,44 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { print(e); }
   }
 
+  // Hàm hiển thị hướng dẫn sử dụng
+  void _showInstructions() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: Colors.blue),
+            SizedBox(width: 10),
+            Text("Hướng dẫn sử dụng"),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("1. Thiết lập điểm đo (P1, P2...):", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("• Chọn Px (màu đỏ) rồi nhấn lên bản đồ để đặt vị trí.\n• Nhập khoảng cách đo được vào ô bên dưới."),
+              SizedBox(height: 10),
+              Text("2. Tính toán mục tiêu:", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("• Cần ít nhất 3 điểm P có vị trí và khoảng cách.\n• Nhấn 'TÍNH' để tìm điểm giao nhau (mục tiêu)."),
+              SizedBox(height: 10),
+              Text("3. Quản lý mục tiêu:", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("• Nhấn icon 'Save' để lưu mục tiêu hiện tại.\n• Nhấn giữ tọa độ trên màn hình chính hoặc trong hộp thoại Marker để Copy."),
+              SizedBox(height: 10),
+              Text("4. Danh sách & Sắp xếp:", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text("• Mở danh sách bằng icon 'List' màu tím.\n• Nhấn giữ một hàng để kéo và sắp xếp lại thứ tự."),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÃ HIỂU")),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
@@ -259,13 +297,23 @@ class _MockAppState extends State<MockApp> {
               child: Column(
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: ['ft', 'm', 'km', 'mi'].map((unit) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(label: Text(unit), selected: selectedUnit == unit, onSelected: (val) => setState(() => selectedUnit = unit)),
-                    )).toList(),
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(onPressed: _showInstructions, icon: const Icon(Icons.help_outline, color: Colors.blue)),
+                      Row(
+                        children: ['ft', 'm', 'km', 'mi'].map((unit) => Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: ChoiceChip(
+                            label: Text(unit, style: const TextStyle(fontSize: 10)), 
+                            selected: selectedUnit == unit, 
+                            onSelected: (val) => setState(() => selectedUnit = unit)
+                          ),
+                        )).toList(),
+                      ),
+                      const SizedBox(width: 40), // Cân bằng với nút Help
+                    ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   SizedBox(
                     height: 70,
                     child: ListView.builder(
