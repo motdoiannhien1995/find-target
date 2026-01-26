@@ -22,12 +22,11 @@ class _MockAppState extends State<MockApp> {
   final List<TextEditingController> dists = List.generate(3, (i) => TextEditingController(text: ""));
   
   String selectedUnit = 'ft'; 
-  // Thêm đơn vị mi (1 dặm = 1609.34 mét)
   final Map<String, double> unitToMeter = {
     'ft': 0.3048, 
     'm': 1.0, 
     'km': 1000.0,
-    'mi': 1609.34
+    'mi': 1609.34 // Thêm đơn vị dặm
   };
 
   int? selectedIndex; 
@@ -101,9 +100,10 @@ class _MockAppState extends State<MockApp> {
       for (int k=0; k<3; k++) ey[k] = p3p1iEx[k] / yLen;
       double j = ey[0]*p3p1[0] + ey[1]*p3p1[1] + ey[2]*p3p1[2];
 
-      double xVal = (pow(r1,2).toDouble() - pow(r2,2).toDouble() + pow(d,2).toDouble()) / (2*d);
-      double yVal = ((pow(r1,2).toDouble() - pow(r3,2).toDouble() + pow(i,2).toDouble() + pow(j,2).toDouble()) / (2*j)) - ((i/j) * xVal);
-      double zSq = pow(r1,2).toDouble() - pow(xVal,2).toDouble() - pow(yVal,2).toDouble();
+      // SỬA LỖI GẠCH CHÂN: Ép kiểu toDouble() cho từng hàm pow
+      double xVal = (pow(r1, 2).toDouble() - pow(r2, 2).toDouble() + pow(d, 2).toDouble()) / (2 * d);
+      double yVal = ((pow(r1, 2).toDouble() - pow(r3, 2).toDouble() + pow(i, 2).toDouble() + pow(j, 2).toDouble()) / (2 * j)) - ((i / j) * xVal);
+      double zSq = pow(r1, 2).toDouble() - pow(xVal, 2).toDouble() - pow(yVal, 2).toDouble();
       double zVal = sqrt(max(0.0, zSq)); 
 
       List<double> ez = [ex[1]*ey[2]-ex[2]*ey[1], ex[2]*ey[0]-ex[0]*ey[2], ex[0]*ey[1]-ex[1]*ey[0]];
