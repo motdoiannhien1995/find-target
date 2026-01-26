@@ -20,19 +20,28 @@ class SavedTarget {
   LatLng location;
   String name;
   final DateTime timestamp;
-  SavedTarget({required this.location, required this.name, required this.timestamp});
+  final String id;
+
+  SavedTarget({
+    required this.location, 
+    required this.name, 
+    required this.timestamp,
+    String? id,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(100).toString();
 
   Map<String, dynamic> toJson() => {
     'lat': location.latitude,
     'lng': location.longitude,
     'name': name,
     'time': timestamp.toIso8601String(),
+    'id': id,
   };
 
   factory SavedTarget.fromJson(Map<String, dynamic> json) => SavedTarget(
     location: LatLng(json['lat'], json['lng']),
     name: json['name'],
     timestamp: DateTime.parse(json['time']),
+    id: json['id'],
   );
 }
 
@@ -119,10 +128,7 @@ class _MockAppState extends State<MockApp> {
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
-    if (validBeacons.length < 3) {
-      _showMsg("Cần ít nhất 3 điểm!");
-      return;
-    }
+    if (validBeacons.length < 3) { _showMsg("Cần ít nhất 3 điểm!"); return; }
     try {
       List<double> est = [0, 0, 0];
       for (var b in validBeacons) {
@@ -360,8 +366,6 @@ class _MockAppState extends State<MockApp> {
                             if (beacons[i].location != null)
                               Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
                           if (targetPoint != null) Marker(point: targetPoint!, width: 25, height: 25, child: const Icon(Icons.location_searching, color: Colors.orange, size: 25)),
-                          
-                          // Marker mục tiêu đã lưu (Nhỏ gọn & Nền tối)
                           for (int i = 0; i < savedTargets.length; i++)
                             Marker(
                               point: savedTargets[i].location,
@@ -371,18 +375,11 @@ class _MockAppState extends State<MockApp> {
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.bookmark, color: Colors.purple, size: 20), // Icon nhỏ hơn
+                                    const Icon(Icons.bookmark, color: Colors.purple, size: 20),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.75), // Nền màu tối
-                                        borderRadius: BorderRadius.circular(3)
-                                      ),
-                                      child: Text(
-                                        savedTargets[i].name, 
-                                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w500), // Chữ trắng nhỏ
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.75), borderRadius: BorderRadius.circular(3)),
+                                      child: Text(savedTargets[i].name, style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -425,11 +422,30 @@ class _MockAppState extends State<MockApp> {
   }
 
   void _showTargetOptions(int index) {
+    String coords = "${savedTargets[index].location.latitude.toStringAsFixed(6)}, ${savedTargets[index].location.longitude.toStringAsFixed(6)}";
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(savedTargets[index].name),
-        content: Text("Tọa độ: ${savedTargets[index].location.latitude.toStringAsFixed(6)}, ${savedTargets[index].location.longitude.toStringAsFixed(6)}"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onLongPress: () { 
+                Clipboard.setData(ClipboardData(text: coords)); 
+                _showMsg("Đã copy tọa độ!"); 
+              },
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                color: Colors.grey.shade100,
+                child: Text("Tọa độ: $coords", style: const TextStyle(fontFamily: 'monospace')),
+              ),
+            ),
+            const SizedBox(height: 5),
+            const Text("(Nhấn giữ tọa độ để copy)", style: TextStyle(fontSize: 10, color: Colors.grey)),
+          ],
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(ctx); _editTargetName(index); }),
           IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
@@ -442,28 +458,45 @@ class _MockAppState extends State<MockApp> {
   void _showSavedTargetsSheet() {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(15))),
-      builder: (ctx) => Column(
-        children: [
-          const Padding(padding: EdgeInsets.all(10), child: Text("DANH SÁCH MỤC TIÊU", style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(
-            child: ListView.builder(
-              itemCount: savedTargets.length,
-              itemBuilder: (c, i) => ListTile(
-                leading: const Icon(Icons.location_on, color: Colors.purple, size: 20),
-                title: Text(savedTargets[i].name, style: const TextStyle(fontSize: 14)),
-                subtitle: Text("${savedTargets[i].location.latitude.toStringAsFixed(4)}, ${savedTargets[i].location.longitude.toStringAsFixed(4)}", style: const TextStyle(fontSize: 12)),
-                trailing: Wrap(
-                  children: [
-                    IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 20), onPressed: () { Navigator.pop(ctx); _editTargetName(i); }),
-                    IconButton(icon: const Icon(Icons.delete, color: Colors.red, size: 20), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(i); }),
-                  ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Container(
+          height: MediaQuery.of(context).size.height * 0.6,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            children: [
+              const Text("DANH SÁCH MỤC TIÊU", style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text("(Nhấn giữ hàng để sắp xếp)", style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const Divider(),
+              Expanded(
+                child: ReorderableListView.builder(
+                  itemCount: savedTargets.length,
+                  onReorder: (oldIdx, newIdx) {
+                    setState(() {
+                      if (newIdx > oldIdx) newIdx -= 1;
+                      final item = savedTargets.removeAt(oldIdx);
+                      savedTargets.insert(newIdx, item);
+                      _saveData();
+                    });
+                    setSheetState(() {});
+                  },
+                  itemBuilder: (c, i) {
+                    String rowCoords = "${savedTargets[i].location.latitude.toStringAsFixed(6)}, ${savedTargets[i].location.longitude.toStringAsFixed(6)}";
+                    return ListTile(
+                      key: ValueKey(savedTargets[i].id),
+                      leading: const Icon(Icons.location_on, color: Colors.purple, size: 20),
+                      title: Text(savedTargets[i].name, style: const TextStyle(fontSize: 14)),
+                      subtitle: Text(rowCoords, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.blueGrey)),
+                      trailing: const Icon(Icons.drag_handle, color: Colors.grey),
+                      onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
+                    );
+                  },
                 ),
-                onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
