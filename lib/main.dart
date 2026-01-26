@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'dart:math';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart'; // Đảm bảo đã thêm gói này vào pubspec.yaml
 
 void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
 
@@ -104,6 +105,17 @@ class _MockAppState extends State<MockApp> {
       _mapController.move(current, 15);
       Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
           .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
+    }
+  }
+
+  // HÀM MỞ BẢN ĐỒ ĐỂ CHỈ ĐƯỜNG
+  Future<void> _openNavigation(LatLng destination) async {
+    final url = 'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}';
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _showMsg("Không thể mở bản đồ");
     }
   }
 
@@ -246,7 +258,6 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { print(e); }
   }
 
-  // Hàm hiển thị hướng dẫn sử dụng
   void _showInstructions() {
     showDialog(
       context: context,
@@ -270,7 +281,7 @@ class _MockAppState extends State<MockApp> {
               Text("• Cần ít nhất 3 điểm P có vị trí và khoảng cách.\n• Nhấn 'TÍNH' để tìm điểm giao nhau (mục tiêu)."),
               SizedBox(height: 10),
               Text("3. Quản lý mục tiêu:", style: TextStyle(fontWeight: FontWeight.bold)),
-              Text("• Nhấn icon 'Save' để lưu mục tiêu hiện tại.\n• Nhấn giữ tọa độ trên màn hình chính hoặc trong hộp thoại Marker để Copy."),
+              Text("• Nhấn icon 'Save' để lưu mục tiêu hiện tại.\n• Nhấn giữ tọa độ trên màn hình chính hoặc trong hộp thoại Marker để Copy.\n• Nhấn icon 'Chỉ đường' để mở bản đồ."),
               SizedBox(height: 10),
               Text("4. Danh sách & Sắp xếp:", style: TextStyle(fontWeight: FontWeight.bold)),
               Text("• Mở danh sách bằng icon 'List' màu tím.\n• Nhấn giữ một hàng để kéo và sắp xếp lại thứ tự."),
@@ -310,7 +321,7 @@ class _MockAppState extends State<MockApp> {
                           ),
                         )).toList(),
                       ),
-                      const SizedBox(width: 40), // Cân bằng với nút Help
+                      const SizedBox(width: 40),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -372,6 +383,11 @@ class _MockAppState extends State<MockApp> {
                           ),
                         ),
                       ),
+                      if (targetPoint != null)
+                        IconButton(
+                          icon: const Icon(Icons.directions, color: Colors.orange),
+                          onPressed: () => _openNavigation(targetPoint!),
+                        ),
                       if (targetPoint != null)
                         PopupMenuButton<int>(
                           icon: const Icon(Icons.assignment_returned, color: Colors.blue),
@@ -495,6 +511,11 @@ class _MockAppState extends State<MockApp> {
           ],
         ),
         actions: [
+          // NÚT CHỈ ĐƯỜNG TRONG OPTIONS
+          IconButton(icon: const Icon(Icons.directions, color: Colors.orange), onPressed: () { 
+            Navigator.pop(ctx); 
+            _openNavigation(savedTargets[index].location); 
+          }),
           IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(ctx); _editTargetName(index); }),
           IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG")),
@@ -536,7 +557,17 @@ class _MockAppState extends State<MockApp> {
                       leading: const Icon(Icons.location_on, color: Colors.purple, size: 20),
                       title: Text(savedTargets[i].name, style: const TextStyle(fontSize: 14)),
                       subtitle: Text(rowCoords, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.blueGrey)),
-                      trailing: const Icon(Icons.drag_handle, color: Colors.grey),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // NÚT CHỈ ĐƯỜNG TRONG DANH SÁCH
+                          IconButton(
+                            icon: const Icon(Icons.directions, color: Colors.orange, size: 20),
+                            onPressed: () => _openNavigation(savedTargets[i].location),
+                          ),
+                          const Icon(Icons.drag_handle, color: Colors.grey),
+                        ],
+                      ),
                       onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
                     );
                   },
