@@ -17,8 +17,6 @@ import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
-
-// 👇 QUAN TRỌNG: THÊM DÒNG IMPORT NÀY ĐỂ SỬA LỖI 👇
 import 'package:dio_cache_interceptor_file_store/dio_cache_interceptor_file_store.dart';
 
 // Biến toàn cục lưu Store Cache
@@ -30,7 +28,6 @@ Future<void> main() async {
   // 1. KHỞI TẠO CACHE STORE
   try {
     final dir = await getTemporaryDirectory();
-    // Bây giờ FileCacheStore đã được import đúng
     _mapCacheStore = FileCacheStore('${dir.path}/map_tiles');
   } catch (e) {
     print("Lỗi khởi tạo cache: $e");
@@ -92,6 +89,8 @@ class _MockAppState extends State<MockApp> {
 
   List<Beacon> beacons = [Beacon(), Beacon(), Beacon()];
   List<SavedTarget> savedTargets = [];
+  
+  // ft, m: Dùng công thức phẳng (Gần). km, mi: Dùng công thức cầu (Xa)
   String selectedUnit = 'm'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
 
@@ -122,7 +121,7 @@ class _MockAppState extends State<MockApp> {
     super.dispose();
   }
 
-  // --- LOGIC MOCK GPS (ANTI-FLICKER) ---
+  // --- LOGIC MOCK GPS ---
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     _mockTimer?.cancel();
     void pushMock() {
@@ -298,9 +297,37 @@ class _MockAppState extends State<MockApp> {
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
+  // ==========================================================
+  //      PHẦN TOÁN HỌC: XỬ LÝ SONG SONG (NGẮN & XA)
+  // ==========================================================
+
   double _toRadians(double degree) => degree * pi / 180.0;
   double _toDegrees(double radian) => radian * 180.0 / pi;
 
+  // --- CÔNG THỨC 1: HỆ PHẲNG (CHO m/ft) ---
+  Point<double> _latLngToXy(LatLng origin, LatLng p) {
+    double latAvg = _toRadians((origin.latitude + p.latitude) / 2);
+    // Hằng số trắc địa gần đúng cho khoảng cách ngắn
+    double mPerLat = 111320.0; 
+    double mPerLng = 111320.0 * cos(latAvg); 
+
+    double dy = (p.latitude - origin.latitude) * mPerLat;
+    double dx = (p.longitude - origin.longitude) * mPerLng;
+    return Point(dx, dy);
+  }
+
+  LatLng _xyToLatLng(LatLng origin, double x, double y) {
+    double mPerLat = 111320.0;
+    double latNew = origin.latitude + (y / mPerLat);
+    
+    double latAvg = _toRadians((origin.latitude + latNew) / 2);
+    double mPerLng = 111320.0 * cos(latAvg);
+    double lngNew = origin.longitude + (x / mPerLng);
+
+    return LatLng(latNew, lngNew);
+  }
+
+  // --- CÔNG THỨC 2: HỆ CẦU (CHO km/mi) ---
   double _haversineDistance(LatLng p1, LatLng p2) {
     double dLat = _toRadians(p2.latitude - p1.latitude);
     double dLon = _toRadians(p2.longitude - p1.longitude);
@@ -333,61 +360,128 @@ class _MockAppState extends State<MockApp> {
     return LatLng(_toDegrees(toLat), _toDegrees(toLng));
   }
 
+  // --- HÀM TÍNH TOÁN CHÍNH (THÔNG MINH) ---
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
     if (validBeacons.length < 3) { _showMsg("Cần ít nhất 3 điểm!"); return; }
 
     try {
-      double sumLat = 0, sumLng = 0;
-      for (var b in validBeacons) {
-        sumLat += b.location!.latitude;
-        sumLng += b.location!.longitude;
-      }
-      LatLng currentEst = LatLng(sumLat / validBeacons.length, sumLng / validBeacons.length);
-      double learningRate = 0.5; 
+      LatLng finalResult;
+      double finalResidual;
       
-      for (int i = 0; i < 500; i++) { 
-        double latShift = 0;
-        double lngShift = 0;
-        for (var b in validBeacons) {
-          double currentDist = _haversineDistance(currentEst, b.location!);
-          double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-          double error = currentDist - targetDist;
-          double bearingToP = _calculateBearing(currentEst, b.location!);
-          double moveDist = error * learningRate;
-          latShift += moveDist * cos(_toRadians(bearingToP));
-          lngShift += moveDist * sin(_toRadians(bearingToP));
-        }
-        double avgMoveLat = latShift / validBeacons.length;
-        double avgMoveLng = lngShift / validBeacons.length;
-        double totalMoveDist = sqrt(avgMoveLat*avgMoveLat + avgMoveLng*avgMoveLng);
-        double moveBearing = _toDegrees(atan2(avgMoveLng, avgMoveLat));
+      // KIỂM TRA ĐƠN VỊ ĐỂ CHỌN CHIẾN THUẬT
+      bool isShortRange = (selectedUnit == 'm' || selectedUnit == 'ft');
 
-        if (totalMoveDist > 0.0001) { 
-           currentEst = _computeOffset(currentEst, totalMoveDist, moveBearing);
+      if (isShortRange) {
+        // --- CHIẾN THUẬT 1: PHẲNG HÓA (Siêu chính xác cho ft/m) ---
+        LatLng origin = validBeacons[0].location!;
+        List<Point<double>> points = [];
+        List<double> radii = [];
+
+        // Chuyển sang hệ mét phẳng (XY)
+        for (var b in validBeacons) {
+          points.add(_latLngToXy(origin, b.location!));
+          radii.add(double.parse(b.controller.text) * unitToMeter[selectedUnit]!);
         }
-        learningRate *= 0.99;
+
+        // Ước lượng ban đầu (Trung tâm)
+        double estX = 0, estY = 0;
+        for (var p in points) { estX += p.x; estY += p.y; }
+        estX /= points.length;
+        estY /= points.length;
+
+        // Vòng lặp tối ưu hóa Levenberg-Marquardt (5000 lần)
+        double learningRate = 0.2;
+        for (int i = 0; i < 5000; i++) {
+          double shiftX = 0, shiftY = 0;
+          for (int j = 0; j < points.length; j++) {
+            double dx = estX - points[j].x;
+            double dy = estY - points[j].y;
+            double currentDist = sqrt(dx*dx + dy*dy);
+            if (currentDist == 0) currentDist = 0.000001;
+            
+            double error = currentDist - radii[j];
+            double uX = dx / currentDist;
+            double uY = dy / currentDist;
+            
+            shiftX += -error * uX;
+            shiftY += -error * uY;
+          }
+          estX += shiftX * learningRate / points.length;
+          estY += shiftY * learningRate / points.length;
+          
+          if (shiftX.abs() < 1e-10 && shiftY.abs() < 1e-10) break;
+          learningRate *= 0.995;
+        }
+
+        finalResult = _xyToLatLng(origin, estX, estY);
+        
+        // Tính sai số dư (Residual) theo công thức phẳng
+        double totalRes = 0;
+        for (int i = 0; i < points.length; i++) {
+           double dist = sqrt(pow(estX - points[i].x, 2) + pow(estY - points[i].y, 2));
+           totalRes += (dist - radii[i]).abs();
+        }
+        finalResidual = totalRes / points.length;
+
+      } else {
+        // --- CHIẾN THUẬT 2: HÌNH CẦU (Cho km/mi - Bù độ cong trái đất) ---
+        double sumLat = 0, sumLng = 0;
+        for (var b in validBeacons) { sumLat += b.location!.latitude; sumLng += b.location!.longitude; }
+        LatLng currentEst = LatLng(sumLat / validBeacons.length, sumLng / validBeacons.length);
+        
+        double learningRate = 0.5;
+        for (int i = 0; i < 2000; i++) {
+          double moveLat = 0, moveLng = 0; 
+          for (var b in validBeacons) {
+            double currentDist = _haversineDistance(currentEst, b.location!);
+            double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+            double error = currentDist - targetDist;
+            double bearingToB = _calculateBearing(currentEst, b.location!);
+            double moveDist = error * learningRate;
+            
+            double rad = _toRadians(bearingToB);
+            moveLat += moveDist * cos(rad);
+            moveLng += moveDist * sin(rad);
+          }
+          double avgMoveLat = moveLat / validBeacons.length;
+          double avgMoveLng = moveLng / validBeacons.length;
+          double totalMoveMeters = sqrt(avgMoveLat*avgMoveLat + avgMoveLng*avgMoveLng);
+          double moveBearing = _toDegrees(atan2(avgMoveLng, avgMoveLat));
+
+          if (totalMoveMeters > 0.0001) {
+             currentEst = _computeOffset(currentEst, totalMoveMeters, moveBearing);
+          } else { break; }
+          learningRate *= 0.99;
+        }
+        finalResult = currentEst;
+        
+        // Tính sai số dư theo công thức cầu
+        double totalRes = 0;
+        for (var b in validBeacons) {
+          double realDist = _haversineDistance(finalResult, b.location!);
+          double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+          totalRes += (realDist - targetDist).abs();
+        }
+        finalResidual = totalRes / validBeacons.length;
       }
 
-      double finalResidual = _calculateResidual(currentEst, validBeacons);
+      // HIỂN THỊ KẾT QUẢ
       setState(() {
-        targetPoint = currentEst;
-        resultDisplay = "${currentEst.latitude.toStringAsFixed(6)}, ${currentEst.longitude.toStringAsFixed(6)}";
-        accuracyInfo = "Sai số: ±${finalResidual.toStringAsFixed(2)}m";
+        targetPoint = finalResult;
+        resultDisplay = "${finalResult.latitude.toStringAsFixed(7)}, ${finalResult.longitude.toStringAsFixed(7)}";
+        
+        String unitName = isShortRange ? "m" : "m (Cầu)";
+        if (finalResidual < 0.1) {
+          accuracyInfo = "Tuyệt đối (±${(finalResidual*100).toStringAsFixed(1)}cm)";
+        } else {
+          accuracyInfo = "Sai lệch: ±${finalResidual.toStringAsFixed(2)}$unitName";
+        }
       });
-      _mapController.move(currentEst, 16);
-    } catch (e) { _showMsg("Lỗi: $e"); }
-  }
+      _mapController.move(finalResult, 17); // Zoom sát để xem
 
-  double _calculateResidual(LatLng target, List<Beacon> validOnes) {
-    double totalDiff = 0;
-    for (var b in validOnes) {
-      double realDist = _haversineDistance(target, b.location!);
-      double inputDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-      totalDiff += (realDist - inputDist).abs();
-    }
-    return totalDiff / validOnes.length;
+    } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
   void _saveCurrentTarget() {
@@ -463,10 +557,9 @@ class _MockAppState extends State<MockApp> {
             children: [
               Text("1. Nhấn vào ô P1: Lấy vị trí GPS thật."),
               Text("2. Nhập khoảng cách P1 -> Nhấn P2: Tạo điểm ngẫu nhiên."),
-              Text("3. Play (Xanh): Mock GPS tại P đang chọn."),
-              Text("4. Nút '1' (Teal): Lấy kết quả làm P1 mới (Reset)."),
-              Text("5. Nút List (+): Gán kết quả vào P tiếp theo."),
-              Text("6. Bản đồ sẽ tự động lưu offline khi xem."),
+              Text("3. Chọn đơn vị ft/m cho khoảng cách gần (chính xác cao)."),
+              Text("4. Chọn đơn vị km/mi cho khoảng cách xa (bù độ cong trái đất)."),
+              Text("5. Bấm TÍNH để tìm giao điểm."),
             ],
           ),
         ),
@@ -759,4 +852,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-}
+}   //////// công thức chuẩn gần với mặt phẳng và xa với hình cầu
