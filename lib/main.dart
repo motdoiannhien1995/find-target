@@ -92,7 +92,7 @@ class _MockAppState extends State<MockApp> {
           myRealLocation!.latitude, myRealLocation!.longitude,
           b.location!.latitude, b.location!.longitude
         );
-        if (distance < 100.0) return true; 
+        if (distance < 5.0) return true; 
       }
     }
     return false;
@@ -113,7 +113,7 @@ class _MockAppState extends State<MockApp> {
     }
     try {
       final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
-      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp'});
+      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Project_Map'});
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         if (data.isNotEmpty) {
@@ -327,8 +327,6 @@ class _MockAppState extends State<MockApp> {
   @override
   Widget build(BuildContext context) {
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
-    bool isCurrentLocInUse = _isAnyPUsingCurrentLocation();
-
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: SafeArea(
@@ -396,19 +394,18 @@ class _MockAppState extends State<MockApp> {
                                       ),
                                     ),
                                   ),
-                                  if (!isCurrentLocInUse)
-                                    InkWell(
-                                      onTap: () {
-                                        if (myRealLocation != null) {
-                                          setState(() => beacons[i].location = myRealLocation);
-                                          _showMsg("Đã gán GPS thực vào P${i+1}");
-                                        }
-                                      },
-                                      child: const Padding(
-                                        padding: EdgeInsets.only(left: 4),
-                                        child: Icon(Icons.my_location, size: 18, color: Colors.blue),
-                                      ),
+                                  InkWell(
+                                    onTap: () {
+                                      if (myRealLocation != null) {
+                                        setState(() => beacons[i].location = myRealLocation);
+                                        _showMsg("Đã gán GPS thực vào P${i+1}");
+                                      }
+                                    },
+                                    child: const Padding(
+                                      padding: EdgeInsets.only(left: 4),
+                                      child: Icon(Icons.my_location, size: 18, color: Colors.blue),
                                     ),
+                                  ),
                                 ],
                               ),
                               TextField(controller: beacons[i].controller, keyboardType: TextInputType.number, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10), decoration: InputDecoration(hintText: selectedUnit, isDense: true)),
@@ -480,7 +477,11 @@ class _MockAppState extends State<MockApp> {
                       },
                     ),
                     children: [
-                      TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+                      // SỬA TẠI ĐÂY: Thêm User-Agent để OSM không chặn truy cập
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.example.mockapp', // Tên package của bạn
+                      ),
                       MarkerLayer(
                         markers: [
                           if (myRealLocation != null) Marker(point: myRealLocation!, width: 20, height: 20, child: const CircleAvatar(backgroundColor: Colors.blue, radius: 4)),
@@ -527,11 +528,12 @@ class _MockAppState extends State<MockApp> {
                     ),
                   Positioned(
                     right: 15, bottom: 15,
-                    child: Row(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         if (savedTargets.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(right: 10),
+                            padding: const EdgeInsets.only(bottom: 10),
                             child: FloatingActionButton(heroTag: "listBtn", mini: true, backgroundColor: Colors.purple, onPressed: _showSavedTargetsSheet, child: const Icon(Icons.list, color: Colors.white)),
                           ),
                         FloatingActionButton(
