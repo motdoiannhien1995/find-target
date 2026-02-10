@@ -78,9 +78,8 @@ class _MockAppState extends State<MockApp> {
   bool isMockingTarget = false;
   bool isSearchVisible = false;
 
-  static const double WGS84_A = 6378137.0;
-  static const double WGS84_B = 6356752.314245;
-  static const double E2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
+  // Bán kính Trái Đất trung bình (cho Haversine)
+  static const double EARTH_RADIUS = 6371000.0;
 
   @override
   void initState() {
@@ -101,20 +100,13 @@ class _MockAppState extends State<MockApp> {
   // --- LOGIC MOCK GPS ---
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     _mockTimer?.cancel();
-
     void pushMock() {
       try {
         platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng});
-      } catch (e) {
-        print("Lỗi Mock: $e");
-      }
+      } catch (e) { print("Lỗi Mock: $e"); }
     }
-
     pushMock();
-    _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      pushMock();
-    });
-
+    _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     if (mounted) {
       setState(() {
         isMockingTarget = fromTarget;
@@ -128,29 +120,16 @@ class _MockAppState extends State<MockApp> {
     _mockTimer = null;
     try { 
       await platform.invokeMethod('stopMockLocation'); 
-      if (mounted) {
-        setState(() { 
-          isMockingTarget = false; 
-          selectedIndex = null; 
-        }); 
-      }
+      if (mounted) { setState(() { isMockingTarget = false; selectedIndex = null; }); }
     } catch (e) { print(e); }
   }
 
   // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ ---
   Future<void> _smartSetLocation(int index) async {
-    if (selectedIndex == index) {
-      _stopMock();
-      return;
-    }
-
+    if (selectedIndex == index) { _stopMock(); return; }
     try {
       LatLng newPos;
-      
-      bool shouldUseRandomLogic = index > 0 && 
-                                  beacons[index - 1].location != null && 
-                                  beacons[index - 1].controller.text.isNotEmpty;
-
+      bool shouldUseRandomLogic = index > 0 && beacons[index - 1].location != null && beacons[index - 1].controller.text.isNotEmpty;
       if (!shouldUseRandomLogic) {
         Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
         newPos = LatLng(p.latitude, p.longitude);
@@ -159,36 +138,25 @@ class _MockAppState extends State<MockApp> {
         LatLng prevLoc = beacons[index - 1].location!;
         double distValue = double.tryParse(beacons[index - 1].controller.text) ?? 0;
         double distMeters = distValue * unitToMeter[selectedUnit]!;
-        
         newPos = _calculateRandomPoint(prevLoc, distMeters);
         _showMsg("P${index + 1}: Ngẫu nhiên cách P$index ${distValue}$selectedUnit");
       }
-
       setState(() {
         beacons[index].location = newPos;
         selectedIndex = index;
         isMockingTarget = false;
-        if (!shouldUseRandomLogic) {
-          myRealLocation = newPos;
-        }
+        if (!shouldUseRandomLogic) { myRealLocation = newPos; }
       });
-
       _mapController.move(newPos, 16);
       _setMock(newPos.latitude, newPos.longitude);
-
-    } catch (e) {
-      _showMsg("Lỗi: $e");
-    }
+    } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
   void _assignResultToNextP() {
     if (targetPoint == null) return;
     int nextIndex = -1;
     for (int i = 0; i < beacons.length; i++) {
-      if (beacons[i].location == null) {
-        nextIndex = i;
-        break;
-      }
+      if (beacons[i].location == null) { nextIndex = i; break; }
     }
     setState(() {
       if (nextIndex != -1) {
@@ -205,7 +173,6 @@ class _MockAppState extends State<MockApp> {
     if (targetPoint == null) return;
     LatLng newStart = targetPoint!;
     _mockTimer?.cancel();
-    
     setState(() {
       beacons = [Beacon(location: newStart), Beacon(), Beacon()];
       targetPoint = null;
@@ -215,27 +182,19 @@ class _MockAppState extends State<MockApp> {
       selectedIndex = 0; 
       isMockingTarget = false;
     });
-
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
     _showMsg("Đã lấy kết quả làm gốc P1!");
   }
 
   LatLng _calculateRandomPoint(LatLng start, double distanceMeters) {
-    const double earthRadius = 6371000;
     Random random = Random();
     double bearing = random.nextDouble() * 2 * pi; 
-    
     double startLat = start.latitude * (pi / 180);
     double startLng = start.longitude * (pi / 180);
-    double distRatio = distanceMeters / earthRadius;
-
-    double endLat = asin(sin(startLat) * cos(distRatio) + 
-                    cos(startLat) * sin(distRatio) * cos(bearing));
-    
-    double endLng = startLng + atan2(sin(bearing) * sin(distRatio) * cos(startLat), 
-                    cos(distRatio) - sin(startLat) * sin(endLat));
-
+    double distRatio = distanceMeters / EARTH_RADIUS;
+    double endLat = asin(sin(startLat) * cos(distRatio) + cos(startLat) * sin(distRatio) * cos(bearing));
+    double endLng = startLng + atan2(sin(bearing) * sin(distRatio) * cos(startLat), cos(distRatio) - sin(startLat) * sin(endLat));
     return LatLng(endLat * (180 / pi), endLng * (180 / pi));
   }
 
@@ -303,70 +262,136 @@ class _MockAppState extends State<MockApp> {
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
-  List<double> _latLngToECEF(LatLng loc) {
-    double lat = loc.latitude * pi / 180;
-    double lon = loc.longitude * pi / 180;
-    double N = WGS84_A / sqrt(1 - E2 * pow(sin(lat), 2));
-    return [N * cos(lat) * cos(lon), N * cos(lat) * sin(lon), (N * (1 - E2)) * sin(lat)];
+  // --- CÔNG THỨC HAVERSINE VÀ TOÁN HỌC ---
+  
+  // 1. Chuyển đổi độ sang radian
+  double _toRadians(double degree) => degree * pi / 180.0;
+  // 2. Chuyển đổi radian sang độ
+  double _toDegrees(double radian) => radian * 180.0 / pi;
+
+  // 3. Tính khoảng cách Haversine giữa 2 điểm (trả về mét)
+  double _haversineDistance(LatLng p1, LatLng p2) {
+    double dLat = _toRadians(p2.latitude - p1.latitude);
+    double dLon = _toRadians(p2.longitude - p1.longitude);
+    double lat1 = _toRadians(p1.latitude);
+    double lat2 = _toRadians(p2.latitude);
+
+    double a = pow(sin(dLat / 2), 2) + pow(sin(dLon / 2), 2) * cos(lat1) * cos(lat2);
+    double c = 2 * asin(sqrt(a));
+    return EARTH_RADIUS * c;
   }
 
-  LatLng _ecefToLatLng(double x, double y, double z) {
-    double lon = atan2(y, x);
-    double p = sqrt(x * x + y * y);
-    double lat = atan2(z, p * (1 - E2));
-    for (int i = 0; i < 5; i++) {
-      double N = WGS84_A / sqrt(1 - E2 * pow(sin(lat), 2));
-      lat = atan2(z + E2 * N * sin(lat), p);
-    }
-    return LatLng(lat * 180 / pi, lon * 180 / pi);
+  // 4. Tính góc phương vị (Bearing) giữa 2 điểm
+  double _calculateBearing(LatLng start, LatLng end) {
+    double startLat = _toRadians(start.latitude);
+    double startLng = _toRadians(start.longitude);
+    double endLat = _toRadians(end.latitude);
+    double endLng = _toRadians(end.longitude);
+    double dLng = endLng - startLng;
+
+    double y = sin(dLng) * cos(endLat);
+    double x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng);
+    double bearing = atan2(y, x);
+    return (_toDegrees(bearing) + 360) % 360; // Chuẩn hóa 0-360 độ
   }
 
+  // 5. Tính điểm mới từ điểm bắt đầu, khoảng cách và góc phương vị
+  LatLng _computeOffset(LatLng from, double distance, double heading) {
+    double distRatio = distance / EARTH_RADIUS;
+    double headingRad = _toRadians(heading);
+    double fromLat = _toRadians(from.latitude);
+    double fromLng = _toRadians(from.longitude);
+
+    double toLat = asin(sin(fromLat) * cos(distRatio) + cos(fromLat) * sin(distRatio) * cos(headingRad));
+    double toLng = fromLng + atan2(sin(headingRad) * sin(distRatio) * cos(fromLat), cos(distRatio) - sin(fromLat) * sin(toLat));
+    return LatLng(_toDegrees(toLat), _toDegrees(toLng));
+  }
+
+  // --- THUẬT TOÁN TỐI ƯU HÓA DỰA TRÊN HAVERSINE ---
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
     if (validBeacons.length < 3) { _showMsg("Cần ít nhất 3 điểm!"); return; }
+
     try {
-      List<double> est = [0, 0, 0];
+      // B1: Điểm khởi đầu (Trung bình cộng)
+      double sumLat = 0, sumLng = 0;
       for (var b in validBeacons) {
-        var p = _latLngToECEF(b.location!);
-        est[0] += p[0]; est[1] += p[1]; est[2] += p[2];
+        sumLat += b.location!.latitude;
+        sumLng += b.location!.longitude;
       }
-      est = est.map((e) => e / validBeacons.length).toList();
-      for (int iter = 0; iter < 40; iter++) {
-        double dx = 0, dy = 0, dz = 0;
+      LatLng currentEst = LatLng(sumLat / validBeacons.length, sumLng / validBeacons.length);
+
+      // B2: Vòng lặp tối ưu hóa (Gradient Descent trên mặt cầu)
+      double learningRate = 0.5; // Tốc độ học ban đầu
+      
+      for (int i = 0; i < 500; i++) { // Lặp 500 lần cho chính xác
+        double latShift = 0;
+        double lngShift = 0;
+        
         for (var b in validBeacons) {
-          var p = _latLngToECEF(b.location!);
-          double r_measured = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-          double vx = est[0] - p[0]; double vy = est[1] - p[1]; double vz = est[2] - p[2];
-          double dist = sqrt(vx * vx + vy * vy + vz * vz);
-          if (dist < 0.1) continue;
-          double error = dist - r_measured;
-          dx += error * (vx / dist); dy += error * (vy / dist); dz += error * (vz / dist);
+          // Tính khoảng cách Haversine từ điểm ước lượng đến P
+          double estimatedDist = _haversineDistance(currentEst, b.location!);
+          
+          // Khoảng cách người dùng nhập (R)
+          double inputDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+          
+          // Sai số (Error): Nếu estimated > input (xa quá) -> Error dương -> Cần kéo lại gần
+          double error = estimatedDist - inputDist;
+
+          // Tính hướng từ ước lượng đến P
+          double bearingToP = _calculateBearing(currentEst, b.location!);
+
+          // Di chuyển điểm ước lượng về phía P (hoặc ra xa P)
+          // Ta cần tính vector di chuyển. Vì đây là Lat/Lng, ta dùng xấp xỉ nhỏ.
+          
+          // Tính thành phần dịch chuyển (Vector addition)
+          // Di chuyển một đoạn = error * learningRate về hướng bearingToP
+          double moveDist = error * learningRate;
+          
+          // Để đơn giản hóa trong vòng lặp gradient, ta cộng dồn vector
+          // (Lưu ý: đây là vector lực, không phải tọa độ chính xác, nhưng đủ tốt để hội tụ)
+          latShift += moveDist * cos(_toRadians(bearingToP));
+          lngShift += moveDist * sin(_toRadians(bearingToP));
         }
-        est[0] -= (dx / validBeacons.length) * 0.2;
-        est[1] -= (dy / validBeacons.length) * 0.2;
-        est[2] -= (dz / validBeacons.length) * 0.2;
+
+        // Trung bình hóa vector dịch chuyển
+        double avgMoveLat = latShift / validBeacons.length;
+        double avgMoveLng = lngShift / validBeacons.length;
+        
+        // Cập nhật vị trí mới bằng cách di chuyển điểm cũ
+        // Tổng hợp lực di chuyển
+        double totalMoveDist = sqrt(avgMoveLat*avgMoveLat + avgMoveLng*avgMoveLng);
+        double moveBearing = _toDegrees(atan2(avgMoveLng, avgMoveLat));
+
+        if (totalMoveDist > 0.0001) { // Chỉ di chuyển nếu lực đủ lớn
+           currentEst = _computeOffset(currentEst, totalMoveDist, moveBearing);
+        }
+
+        learningRate *= 0.99; // Giảm dần tốc độ học
       }
-      LatLng finalRes = _ecefToLatLng(est[0], est[1], est[2]);
-      double residual = _calculateResidual(finalRes, validBeacons);
+
+      double finalResidual = _calculateResidual(currentEst, validBeacons);
       setState(() {
-        targetPoint = finalRes;
-        resultDisplay = "${finalRes.latitude.toStringAsFixed(6)}, ${finalRes.longitude.toStringAsFixed(6)}";
-        accuracyInfo = "Sai số TB: ±${residual.toStringAsFixed(1)}m";
+        targetPoint = currentEst;
+        resultDisplay = "${currentEst.latitude.toStringAsFixed(6)}, ${currentEst.longitude.toStringAsFixed(6)}";
+        accuracyInfo = "Sai số (Haversine): ±${finalResidual.toStringAsFixed(2)}m";
       });
-      _mapController.move(finalRes, 15);
+      _mapController.move(currentEst, 16);
+
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
   double _calculateResidual(LatLng target, List<Beacon> validOnes) {
-    double sumSq = 0;
+    double totalDiff = 0;
     for (var b in validOnes) {
-      double d = Geolocator.distanceBetween(target.latitude, target.longitude, b.location!.latitude, b.location!.longitude);
-      double r = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-      sumSq += pow(d - r, 2).toDouble();
+      double realDist = _haversineDistance(target, b.location!); // Dùng Haversine kiểm tra lại
+      double inputDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+      totalDiff += (realDist - inputDist).abs();
     }
-    return sqrt(sumSq / validOnes.length);
+    return totalDiff / validOnes.length;
   }
+  // ---------------------------------------------------
 
   void _saveCurrentTarget() {
     if (targetPoint == null) return;
@@ -497,7 +522,7 @@ class _MockAppState extends State<MockApp> {
                           return IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), onPressed: () => setState(() => beacons.add(Beacon())));
                         }
                         return Container(
-                          width: 80, // Thu gọn kích thước vì đã bỏ nút GPS
+                          width: 80, 
                           margin: const EdgeInsets.symmetric(horizontal: 4),
                           child: Column(
                             children: [
