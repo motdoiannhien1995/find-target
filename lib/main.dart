@@ -84,18 +84,79 @@ class _MockAppState extends State<MockApp> {
     _loadData();
   }
 
-  bool _isAnyPUsingCurrentLocation() {
-    if (myRealLocation == null) return false;
-    for (var b in beacons) {
-      if (b.location != null) {
-        double distance = Geolocator.distanceBetween(
-          myRealLocation!.latitude, myRealLocation!.longitude,
-          b.location!.latitude, b.location!.longitude
-        );
-        if (distance < 5.0) return true; 
-      }
+  // --- LOGIC MỚI: TỰ ĐỘNG TÍNH VỊ TRÍ (THỰC TẾ HOẶC NGẪU NHIÊN) ---
+  Future<void> _smartSetLocation(int index) async {
+    // Nếu bấm lại vào chính nó thì tắt/bật mock
+    if (selectedIndex == index) {
+      _stopMock();
+      return;
     }
-    return false;
+
+    try {
+      LatLng newPos;
+      
+      // LOGIC: 
+      // 1. Nếu là P1 (index 0) -> Luôn lấy vị trí thật.
+      // 2. Nếu là P2, P3... nhưng điểm trước đó chưa có dữ liệu -> Lấy vị trí thật.
+      // 3. Nếu điểm trước đó đã có vị trí VÀ có nhập khoảng cách -> Tính điểm ngẫu nhiên.
+
+      bool shouldUseRandomLogic = index > 0 && 
+                                  beacons[index - 1].location != null && 
+                                  beacons[index - 1].controller.text.isNotEmpty;
+
+      if (!shouldUseRandomLogic) {
+        // Lấy vị trí GPS thật
+        Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+        newPos = LatLng(p.latitude, p.longitude);
+        _showMsg("P${index + 1}: Đã lấy vị trí hiện tại");
+      } else {
+        // Lấy vị trí ngẫu nhiên dựa trên điểm trước đó
+        LatLng prevLoc = beacons[index - 1].location!;
+        double distValue = double.tryParse(beacons[index - 1].controller.text) ?? 0;
+        double distMeters = distValue * unitToMeter[selectedUnit]!;
+        
+        newPos = _calculateRandomPoint(prevLoc, distMeters);
+        _showMsg("P${index + 1}: Ngẫu nhiên cách P$index ${distValue}$selectedUnit");
+      }
+
+      setState(() {
+        beacons[index].location = newPos;
+        selectedIndex = index;
+        isMockingTarget = false;
+        // Nếu lấy vị trí thật thì cập nhật marker xanh của user luôn
+        if (!shouldUseRandomLogic) {
+          myRealLocation = newPos;
+        }
+      });
+
+      // Di chuyển bản đồ và Mock GPS
+      _mapController.move(newPos, 16);
+      _setMock(newPos.latitude, newPos.longitude);
+
+    } catch (e) {
+      _showMsg("Lỗi: $e");
+    }
+  }
+
+  // Hàm toán học tính điểm ngẫu nhiên
+  LatLng _calculateRandomPoint(LatLng start, double distanceMeters) {
+    const double earthRadius = 6371000; // mét
+    Random random = Random();
+    
+    // Góc ngẫu nhiên từ 0 đến 360 độ (đổi sang radian)
+    double bearing = random.nextDouble() * 2 * pi; 
+    
+    double startLat = start.latitude * (pi / 180);
+    double startLng = start.longitude * (pi / 180);
+    double distRatio = distanceMeters / earthRadius;
+
+    double endLat = asin(sin(startLat) * cos(distRatio) + 
+                    cos(startLat) * sin(distRatio) * cos(bearing));
+    
+    double endLng = startLng + atan2(sin(bearing) * sin(distRatio) * cos(startLat), 
+                    cos(distRatio) - sin(startLat) * sin(endLat));
+
+    return LatLng(endLat * (180 / pi), endLng * (180 / pi));
   }
 
   Future<void> _searchLocation() async {
@@ -113,7 +174,8 @@ class _MockAppState extends State<MockApp> {
     }
     try {
       final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
-      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Project_Map'});
+      // Thêm User-Agent fix lỗi Access Blocked
+      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Mock_v1'});
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         if (data.isNotEmpty) {
@@ -312,10 +374,10 @@ class _MockAppState extends State<MockApp> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("1. Chọn Px rồi nhấn lên bản đồ để đặt vị trí."),
-              Text("2. Nhấn icon tâm ngắm nhỏ cạnh Px để gán vị trí hiện tại."),
-              Text("3. Nhập khoảng cách đo và nhấn 'TÍNH'."),
-              Text("4. Dùng icon gán (assignment) để đưa kết quả vào Px."),
+              Text("1. Nhấn P1: Tự động lấy vị trí thật của bạn."),
+              Text("2. Nhập khoảng cách vào P1 (ví dụ 500)."),
+              Text("3. Nhấn P2: Tự động tạo điểm ngẫu nhiên cách P1 500m."),
+              Text("4. Bấm TÍNH để xem kết quả."),
             ],
           ),
         ),
@@ -374,16 +436,8 @@ class _MockAppState extends State<MockApp> {
                                 children: [
                                   Expanded(
                                     child: GestureDetector(
-                                      onTap: () {
-                                        if (selectedIndex == i) { _stopMock(); } 
-                                        else {
-                                          setState(() { selectedIndex = i; isMockingTarget = false; });
-                                          if (beacons[i].location != null) { 
-                                            _mapController.move(beacons[i].location!, 14); 
-                                            _setMock(beacons[i].location!.latitude, beacons[i].location!.longitude); 
-                                          }
-                                        }
-                                      },
+                                      // SỬA: Gọi hàm thông minh (Thật hoặc Ngẫu nhiên)
+                                      onTap: () => _smartSetLocation(i),
                                       child: Container(
                                         alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
                                         decoration: BoxDecoration(
@@ -394,12 +448,14 @@ class _MockAppState extends State<MockApp> {
                                       ),
                                     ),
                                   ),
+                                  // Nút gán lại GPS thực thủ công
                                   InkWell(
-                                    onTap: () {
-                                      if (myRealLocation != null) {
-                                        setState(() => beacons[i].location = myRealLocation);
-                                        _showMsg("Đã gán GPS thực vào P${i+1}");
-                                      }
+                                    onTap: () async {
+                                        Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+                                        setState(() {
+                                          beacons[i].location = LatLng(p.latitude, p.longitude);
+                                          _showMsg("Gán lại P${i+1} bằng GPS thật");
+                                        });
                                     },
                                     child: const Padding(
                                       padding: EdgeInsets.only(left: 4),
@@ -477,10 +533,10 @@ class _MockAppState extends State<MockApp> {
                       },
                     ),
                     children: [
-                      // SỬA TẠI ĐÂY: Thêm User-Agent để OSM không chặn truy cập
+                      // FIX LỖI ACCESS BLOCKED
                       TileLayer(
                         urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.example.mockapp', // Tên package của bạn
+                        userAgentPackageName: 'com.example.mockapp_fix', // Quan trọng: Định danh app
                       ),
                       MarkerLayer(
                         markers: [
@@ -623,4 +679,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-}
+} /////////////////////////////
