@@ -148,33 +148,97 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { print(e); }
   }
 
-  // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ P ---
+  // --- LOGIC: QUẢN LÝ ĐIỂM P (THÊM/SỬA/XÓA) ---
+  
+  // 1. Chọn / Tạo điểm (ĐÃ CẬP NHẬT LOGIC TÌM KHOẢNG CÁCH NHỎ NHẤT)
   Future<void> _smartSetLocation(int index) async {
     if (selectedIndex == index) { _stopMock(); return; }
     try {
       LatLng newPos;
-      bool shouldUseRandomLogic = index > 0 && beacons[index - 1].location != null && beacons[index - 1].controller.text.isNotEmpty;
       
-      if (!shouldUseRandomLogic) {
+      // Biến để lưu trữ thông tin về điểm "tốt nhất" để dựa vào
+      int bestReferenceIndex = -1;
+      double minDistance = double.infinity;
+
+      // Chỉ chạy logic tìm kiếm nếu không phải là P1 (index > 0)
+      if (index > 0) {
+        // Quét tất cả các điểm TRƯỚC điểm hiện tại
+        for (int i = 0; i < index; i++) {
+          if (beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
+             double? dist = double.tryParse(beacons[i].controller.text);
+             if (dist != null && dist > 0) {
+               // Nếu khoảng cách này nhỏ hơn khoảng cách nhỏ nhất đã tìm thấy
+               if (dist < minDistance) {
+                 minDistance = dist;
+                 bestReferenceIndex = i;
+               }
+             }
+          }
+        }
+      }
+
+      // Logic quyết định: Dùng GPS thật hay dùng Random từ điểm tốt nhất
+      if (bestReferenceIndex == -1) {
+        // Trường hợp 1: Là P1 hoặc không tìm thấy điểm nào trước đó có nhập khoảng cách
         Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
         newPos = LatLng(p.latitude, p.longitude);
         _showMsg("P${index + 1}: Đã lấy vị trí GPS thật");
       } else {
-        LatLng prevLoc = beacons[index - 1].location!;
-        double distValue = double.tryParse(beacons[index - 1].controller.text) ?? 0;
+        // Trường hợp 2: Tìm thấy điểm có khoảng cách nhỏ nhất (bestReferenceIndex)
+        LatLng baseLoc = beacons[bestReferenceIndex].location!;
+        double distValue = minDistance; // Đã lấy min ở trên
         double distMeters = distValue * unitToMeter[selectedUnit]!;
-        newPos = _calculateRandomPoint(prevLoc, distMeters);
-        _showMsg("P${index + 1}: Ngẫu nhiên cách P$index ${distValue}$selectedUnit");
+        
+        newPos = _calculateRandomPoint(baseLoc, distMeters);
+        _showMsg("P${index + 1}: Ngẫu nhiên từ P${bestReferenceIndex + 1} (${distValue}$selectedUnit)");
       }
+
       setState(() {
         beacons[index].location = newPos;
         selectedIndex = index;
         isMockingTarget = false;
-        if (!shouldUseRandomLogic) { myRealLocation = newPos; }
+        // Nếu dùng GPS thật thì cập nhật luôn myRealLocation để hiện chấm xanh
+        if (bestReferenceIndex == -1) { myRealLocation = newPos; }
       });
+      
       _mapController.move(newPos, 16);
       _setMock(newPos.latitude, newPos.longitude);
     } catch (e) { _showMsg("Lỗi: $e"); }
+  }
+
+  // 2. Xóa điểm
+  void _confirmDeleteBeacon(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Xóa điểm P${index + 1}?"),
+        content: const Text("Dữ liệu của điểm này sẽ bị mất."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _deleteBeacon(index);
+            },
+            child: const Text("XÓA", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteBeacon(int index) {
+    setState(() {
+      if (selectedIndex == index) {
+        _stopMock();
+      } else if (selectedIndex != null && selectedIndex! > index) {
+        selectedIndex = selectedIndex! - 1;
+      }
+      beacons[index].controller.dispose();
+      beacons.removeAt(index);
+    });
+    _showMsg("Đã xóa P${index + 1} cũ");
   }
 
   void _assignResultToNextP() {
@@ -197,7 +261,7 @@ class _MockAppState extends State<MockApp> {
   void _restartWithResultAsP1() {
     if (targetPoint == null) return;
     LatLng newStart = targetPoint!;
-    _mockTimer?.cancel();
+    _stopMock();
     setState(() {
       beacons = [Beacon(location: newStart), Beacon(), Beacon()];
       targetPoint = null;
@@ -360,7 +424,7 @@ class _MockAppState extends State<MockApp> {
     return LatLng(_toDegrees(toLat), _toDegrees(toLng));
   }
 
-  // --- HÀM TÍNH TOÁN CHÍNH (THÔNG MINH) ---
+  // --- HÀM TÍNH TOÁN CHÍNH (DUAL-MODE) ---
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
@@ -556,7 +620,7 @@ class _MockAppState extends State<MockApp> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text("1. Nhấn vào ô P1: Lấy vị trí GPS thật."),
-              Text("2. Nhập khoảng cách P1 -> Nhấn P2: Tạo điểm ngẫu nhiên."),
+              Text("2. Nhấn giữ (Long press) ô Px: Để XÓA điểm."),
               Text("3. Chọn đơn vị ft/m cho khoảng cách gần (chính xác cao)."),
               Text("4. Chọn đơn vị km/mi cho khoảng cách xa (bù độ cong trái đất)."),
               Text("5. Bấm TÍNH để tìm giao điểm."),
@@ -617,6 +681,7 @@ class _MockAppState extends State<MockApp> {
                             children: [
                               GestureDetector(
                                 onTap: () => _smartSetLocation(i),
+                                onLongPress: () => _confirmDeleteBeacon(i), // <-- TÍNH NĂNG XÓA ĐIỂM
                                 child: Container(
                                   width: double.infinity,
                                   alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
@@ -852,4 +917,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-}   //////// công thức chuẩn gần với mặt phẳng và xa với hình cầu
+}
