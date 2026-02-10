@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
+import 'dart:async'; 
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
@@ -13,6 +14,7 @@ import 'package:http/http.dart' as http;
 
 void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
 
+// --- MODELS ---
 class Beacon {
   LatLng? location;
   final TextEditingController controller;
@@ -48,6 +50,7 @@ class SavedTarget {
   );
 }
 
+// --- MAIN WIDGET ---
 class MockApp extends StatefulWidget {
   const MockApp({super.key});
   @override
@@ -59,6 +62,8 @@ class _MockAppState extends State<MockApp> {
   final MapController _mapController = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
   
+  Timer? _mockTimer;
+
   List<Beacon> beacons = [Beacon(), Beacon(), Beacon()];
   List<SavedTarget> savedTargets = [];
   String selectedUnit = 'm'; 
@@ -84,7 +89,55 @@ class _MockAppState extends State<MockApp> {
     _loadData();
   }
 
-  // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ (THỰC TẾ HOẶC NGẪU NHIÊN) ---
+  @override
+  void dispose() {
+    _mockTimer?.cancel();
+    _mapController.dispose();
+    _searchCtrl.dispose();
+    for (var b in beacons) b.controller.dispose();
+    super.dispose();
+  }
+
+  // --- LOGIC MOCK GPS ---
+  Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
+    _mockTimer?.cancel();
+
+    void pushMock() {
+      try {
+        platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng});
+      } catch (e) {
+        print("Lỗi Mock: $e");
+      }
+    }
+
+    pushMock();
+    _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      pushMock();
+    });
+
+    if (mounted) {
+      setState(() {
+        isMockingTarget = fromTarget;
+        if (fromTarget) selectedIndex = null;
+      });
+    }
+  }
+
+  Future<void> _stopMock() async {
+    _mockTimer?.cancel();
+    _mockTimer = null;
+    try { 
+      await platform.invokeMethod('stopMockLocation'); 
+      if (mounted) {
+        setState(() { 
+          isMockingTarget = false; 
+          selectedIndex = null; 
+        }); 
+      }
+    } catch (e) { print(e); }
+  }
+
+  // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ ---
   Future<void> _smartSetLocation(int index) async {
     if (selectedIndex == index) {
       _stopMock();
@@ -128,7 +181,6 @@ class _MockAppState extends State<MockApp> {
     }
   }
 
-  // --- LOGIC: GÁN KẾT QUẢ VÀO P TIẾP THEO ---
   void _assignResultToNextP() {
     if (targetPoint == null) return;
     int nextIndex = -1;
@@ -149,32 +201,24 @@ class _MockAppState extends State<MockApp> {
     });
   }
 
-  // --- LOGIC MỚI: RESET VÀ GÁN KẾT QUẢ VÀO P1 ---
   void _restartWithResultAsP1() {
     if (targetPoint == null) return;
     LatLng newStart = targetPoint!;
+    _mockTimer?.cancel();
     
     setState(() {
-      // 1. Tạo danh sách mới, P1 là kết quả vừa tính, P2, P3 trống
-      beacons = [
-        Beacon(location: newStart), 
-        Beacon(), 
-        Beacon()
-      ];
-      
-      // 2. Xóa kết quả tính toán cũ để bắt đầu phiên mới
+      beacons = [Beacon(location: newStart), Beacon(), Beacon()];
       targetPoint = null;
       resultDisplay = "0.000000, 0.000000";
       accuracyInfo = "Residual: --";
       searchMarker = null;
-      selectedIndex = 0; // Chọn P1 luôn để người dùng biết đang ở đâu
+      selectedIndex = 0; 
       isMockingTarget = false;
     });
 
-    // 3. Di chuyển map về P1 mới và Mock GPS tại đó
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã lấy kết quả làm gốc P1. Sẵn sàng đo tiếp!");
+    _showMsg("Đã lấy kết quả làm gốc P1!");
   }
 
   LatLng _calculateRandomPoint(LatLng start, double distanceMeters) {
@@ -385,20 +429,6 @@ class _MockAppState extends State<MockApp> {
 
   void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 1)));
 
-  Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
-    try {
-      await platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng});
-      setState(() { isMockingTarget = fromTarget; if (fromTarget) selectedIndex = null; });
-    } catch (e) { print(e); }
-  }
-
-  Future<void> _stopMock() async {
-    try { 
-      await platform.invokeMethod('stopMockLocation'); 
-      setState(() { isMockingTarget = false; selectedIndex = null; }); 
-    } catch (e) { print(e); }
-  }
-
   void _showInstructions() {
     showDialog(
       context: context,
@@ -409,11 +439,11 @@ class _MockAppState extends State<MockApp> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("1. Nhấn nút GPS (bên cạnh P): Lấy vị trí thật."),
-              Text("2. Nhấn P: Nếu P trước đó có dữ liệu -> Tạo điểm ngẫu nhiên."),
-              Text("3. Nút Play xanh: Chuyển vị trí ảo đến P hoặc Mục tiêu."),
-              Text("4. Nút Số 1 (Teal): Lấy kết quả làm P1 và tính toán lại từ đầu."),
-              Text("5. Nút List (+): Chỉ gán kết quả vào P trống kế tiếp (giữ nguyên các P cũ)."),
+              Text("1. Nhấn vào ô P1: Lấy vị trí thật (GPS)."),
+              Text("2. Nhập khoảng cách P1 và Nhấn P2: Tạo điểm ngẫu nhiên cách P1."),
+              Text("3. Nút Play xanh: Bắt đầu Mock GPS."),
+              Text("4. Nút Số 1 (Teal): Lấy kết quả làm P1 và reset."),
+              Text("5. Nút List (+): Gán kết quả vào P tiếp theo."),
             ],
           ),
         ),
@@ -434,6 +464,7 @@ class _MockAppState extends State<MockApp> {
               padding: const EdgeInsets.all(8), color: Colors.white,
               child: Column(
                 children: [
+                  // --- TOP BAR ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -455,6 +486,7 @@ class _MockAppState extends State<MockApp> {
                     ],
                   ),
                   const SizedBox(height: 4),
+                  // --- BEACONS LIST (ĐÃ XÓA NÚT GPS) ---
                   SizedBox(
                     height: 70,
                     child: ListView.builder(
@@ -465,38 +497,21 @@ class _MockAppState extends State<MockApp> {
                           return IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), onPressed: () => setState(() => beacons.add(Beacon())));
                         }
                         return Container(
-                          width: 100, margin: const EdgeInsets.symmetric(horizontal: 4),
+                          width: 80, // Thu gọn kích thước vì đã bỏ nút GPS
+                          margin: const EdgeInsets.symmetric(horizontal: 4),
                           child: Column(
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: () => _smartSetLocation(i),
-                                      child: Container(
-                                        alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? Colors.green : Colors.grey.shade400),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text("P${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                                      ),
-                                    ),
+                              GestureDetector(
+                                onTap: () => _smartSetLocation(i),
+                                child: Container(
+                                  width: double.infinity,
+                                  alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? Colors.green : Colors.grey.shade400),
+                                    borderRadius: BorderRadius.circular(4),
                                   ),
-                                  InkWell(
-                                    onTap: () async {
-                                        Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-                                        setState(() {
-                                          beacons[i].location = LatLng(p.latitude, p.longitude);
-                                          _showMsg("Gán GPS thật vào P${i+1}");
-                                        });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      child: const Icon(Icons.my_location, size: 20, color: Colors.blue),
-                                    ),
-                                  ),
-                                ],
+                                  child: Text("P${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                ),
                               ),
                               TextField(controller: beacons[i].controller, keyboardType: TextInputType.number, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10), decoration: InputDecoration(hintText: selectedUnit, isDense: true)),
                             ],
@@ -506,6 +521,7 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // --- INFO DISPLAY ---
                   GestureDetector(
                     onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
                     child: Column(
@@ -516,6 +532,7 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const Divider(height: 10),
+                  // --- CONTROL BUTTONS ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -524,7 +541,6 @@ class _MockAppState extends State<MockApp> {
                         _stopMock();
                       }),
                       
-                      // NÚT MỚI: RESET & GÁN VÀO P1
                       if (targetPoint != null)
                          Tooltip(
                            message: "Bắt đầu lại với kết quả là P1",
@@ -534,7 +550,6 @@ class _MockAppState extends State<MockApp> {
                            ),
                          ),
 
-                      // NÚT CŨ: GÁN VÀO P TIẾP THEO
                       if (targetPoint != null)
                          Tooltip(
                            message: "Gán kết quả vào P trống tiếp theo",
@@ -546,10 +561,12 @@ class _MockAppState extends State<MockApp> {
 
                       if (targetPoint != null)
                         IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
+                      
                       IconButton(
                         onPressed: (targetPoint == null && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { if (targetPoint != null) _setMock(targetPoint!.latitude, targetPoint!.longitude, fromTarget: true); }),
                         icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
                       ),
+                      
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
                         onPressed: _calculateTrilateration, 
@@ -561,6 +578,7 @@ class _MockAppState extends State<MockApp> {
               ),
             ),
             
+            // --- MAP ---
             Expanded(
               child: Stack(
                 children: [
