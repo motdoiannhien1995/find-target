@@ -11,17 +11,26 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   
-  # Thư viện lấy tọa độ GPS
-  geolocator: ^10.1.0
-  # Thư viện hiển thị bản đồ OpenStreetMap
-  flutter_map: ^6.1.0
-  # Thư viện xử lý kiểu dữ liệu LatLng
-  latlong2: ^0.9.1
+  # --- CÁC THƯ VIỆN CHÍNH ---
+  geolocator: ^10.1.0        
+  flutter_map: ^6.1.0        
+  latlong2: ^0.9.1           
   permission_handler: ^11.3.1
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.2.2 
   url_launcher: ^6.3.2
+  http: ^1.1.0
+
+  # --- BỘ THƯ VIỆN CACHE (ĐÃ CHỈNH VERSION ĐỂ KHỚP NHAU) ---
+  flutter_map_cache: ^1.4.0  
+  dio: ^5.3.0                
+  dio_cache_interceptor: ^3.5.0 
+  # 👇 Đã hạ xuống 1.2.3 theo yêu cầu của Flutter 👇
+  dio_cache_interceptor_file_store: ^1.2.3
+  path_provider: ^2.1.1      
+
+  # --- KHÁC ---
   rename: ^3.1.0
-  flutter_overlay_window: ^0.5.0 # Kiểm tra phiên bản mới nhất trên pub.dev
+  flutter_overlay_window: ^0.5.0
 
 dev_dependencies:
   flutter_test:
@@ -35,6 +44,6 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/app_icon.png" # Đường dẫn đến file ảnh của bạn
-  adaptive_icon_background: "#FFFFFF" # Màu nền cho icon Android (nếu cần)
+  image_path: "assets/app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/app_icon.png"

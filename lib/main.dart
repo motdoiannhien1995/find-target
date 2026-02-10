@@ -12,7 +12,33 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 
-void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
+// --- THƯ VIỆN CACHE ---
+import 'package:flutter_map_cache/flutter_map_cache.dart';
+import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+
+// 👇 QUAN TRỌNG: THÊM DÒNG IMPORT NÀY ĐỂ SỬA LỖI 👇
+import 'package:dio_cache_interceptor_file_store/dio_cache_interceptor_file_store.dart';
+
+// Biến toàn cục lưu Store Cache
+late final CacheStore _mapCacheStore;
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 1. KHỞI TẠO CACHE STORE
+  try {
+    final dir = await getTemporaryDirectory();
+    // Bây giờ FileCacheStore đã được import đúng
+    _mapCacheStore = FileCacheStore('${dir.path}/map_tiles');
+  } catch (e) {
+    print("Lỗi khởi tạo cache: $e");
+    _mapCacheStore = MemCacheStore(); 
+  }
+
+  runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
+}
 
 // --- MODELS ---
 class Beacon {
@@ -78,14 +104,13 @@ class _MockAppState extends State<MockApp> {
   bool isMockingTarget = false;
   bool isSearchVisible = false;
 
-  // Bán kính Trái Đất trung bình (cho Haversine)
   static const double EARTH_RADIUS = 6371000.0;
 
   @override
   void initState() {
     super.initState();
     _initLocation();
-    _loadData();
+    _loadData(); 
   }
 
   @override
@@ -97,7 +122,7 @@ class _MockAppState extends State<MockApp> {
     super.dispose();
   }
 
-  // --- LOGIC MOCK GPS ---
+  // --- LOGIC MOCK GPS (ANTI-FLICKER) ---
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     _mockTimer?.cancel();
     void pushMock() {
@@ -124,16 +149,17 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { print(e); }
   }
 
-  // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ ---
+  // --- LOGIC: TỰ ĐỘNG TÍNH VỊ TRÍ P ---
   Future<void> _smartSetLocation(int index) async {
     if (selectedIndex == index) { _stopMock(); return; }
     try {
       LatLng newPos;
       bool shouldUseRandomLogic = index > 0 && beacons[index - 1].location != null && beacons[index - 1].controller.text.isNotEmpty;
+      
       if (!shouldUseRandomLogic) {
         Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
         newPos = LatLng(p.latitude, p.longitude);
-        _showMsg("P${index + 1}: Đã lấy vị trí hiện tại");
+        _showMsg("P${index + 1}: Đã lấy vị trí GPS thật");
       } else {
         LatLng prevLoc = beacons[index - 1].location!;
         double distValue = double.tryParse(beacons[index - 1].controller.text) ?? 0;
@@ -233,6 +259,12 @@ class _MockAppState extends State<MockApp> {
     String encodedData = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
     await prefs.setString('saved_targets', encodedData);
   }
+  
+  Future<void> _saveUnit(String unit) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_unit', unit);
+    setState(() => selectedUnit = unit);
+  }
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -240,6 +272,10 @@ class _MockAppState extends State<MockApp> {
     if (encodedData != null) {
       Iterable l = jsonDecode(encodedData);
       setState(() { savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
+    }
+    String? savedUnit = prefs.getString('selected_unit');
+    if (savedUnit != null) {
+      setState(() => selectedUnit = savedUnit);
     }
   }
 
@@ -262,136 +298,97 @@ class _MockAppState extends State<MockApp> {
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
-  // --- CÔNG THỨC HAVERSINE VÀ TOÁN HỌC ---
-  
-  // 1. Chuyển đổi độ sang radian
   double _toRadians(double degree) => degree * pi / 180.0;
-  // 2. Chuyển đổi radian sang độ
   double _toDegrees(double radian) => radian * 180.0 / pi;
 
-  // 3. Tính khoảng cách Haversine giữa 2 điểm (trả về mét)
   double _haversineDistance(LatLng p1, LatLng p2) {
     double dLat = _toRadians(p2.latitude - p1.latitude);
     double dLon = _toRadians(p2.longitude - p1.longitude);
     double lat1 = _toRadians(p1.latitude);
     double lat2 = _toRadians(p2.latitude);
-
     double a = pow(sin(dLat / 2), 2) + pow(sin(dLon / 2), 2) * cos(lat1) * cos(lat2);
     double c = 2 * asin(sqrt(a));
     return EARTH_RADIUS * c;
   }
 
-  // 4. Tính góc phương vị (Bearing) giữa 2 điểm
   double _calculateBearing(LatLng start, LatLng end) {
     double startLat = _toRadians(start.latitude);
     double startLng = _toRadians(start.longitude);
     double endLat = _toRadians(end.latitude);
     double endLng = _toRadians(end.longitude);
     double dLng = endLng - startLng;
-
     double y = sin(dLng) * cos(endLat);
     double x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng);
     double bearing = atan2(y, x);
-    return (_toDegrees(bearing) + 360) % 360; // Chuẩn hóa 0-360 độ
+    return (_toDegrees(bearing) + 360) % 360; 
   }
 
-  // 5. Tính điểm mới từ điểm bắt đầu, khoảng cách và góc phương vị
   LatLng _computeOffset(LatLng from, double distance, double heading) {
     double distRatio = distance / EARTH_RADIUS;
     double headingRad = _toRadians(heading);
     double fromLat = _toRadians(from.latitude);
     double fromLng = _toRadians(from.longitude);
-
     double toLat = asin(sin(fromLat) * cos(distRatio) + cos(fromLat) * sin(distRatio) * cos(headingRad));
     double toLng = fromLng + atan2(sin(headingRad) * sin(distRatio) * cos(fromLat), cos(distRatio) - sin(fromLat) * sin(toLat));
     return LatLng(_toDegrees(toLat), _toDegrees(toLng));
   }
 
-  // --- THUẬT TOÁN TỐI ƯU HÓA DỰA TRÊN HAVERSINE ---
   void _calculateTrilateration() {
     FocusScope.of(context).unfocus();
     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
     if (validBeacons.length < 3) { _showMsg("Cần ít nhất 3 điểm!"); return; }
 
     try {
-      // B1: Điểm khởi đầu (Trung bình cộng)
       double sumLat = 0, sumLng = 0;
       for (var b in validBeacons) {
         sumLat += b.location!.latitude;
         sumLng += b.location!.longitude;
       }
       LatLng currentEst = LatLng(sumLat / validBeacons.length, sumLng / validBeacons.length);
-
-      // B2: Vòng lặp tối ưu hóa (Gradient Descent trên mặt cầu)
-      double learningRate = 0.5; // Tốc độ học ban đầu
+      double learningRate = 0.5; 
       
-      for (int i = 0; i < 500; i++) { // Lặp 500 lần cho chính xác
+      for (int i = 0; i < 500; i++) { 
         double latShift = 0;
         double lngShift = 0;
-        
         for (var b in validBeacons) {
-          // Tính khoảng cách Haversine từ điểm ước lượng đến P
-          double estimatedDist = _haversineDistance(currentEst, b.location!);
-          
-          // Khoảng cách người dùng nhập (R)
-          double inputDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-          
-          // Sai số (Error): Nếu estimated > input (xa quá) -> Error dương -> Cần kéo lại gần
-          double error = estimatedDist - inputDist;
-
-          // Tính hướng từ ước lượng đến P
+          double currentDist = _haversineDistance(currentEst, b.location!);
+          double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+          double error = currentDist - targetDist;
           double bearingToP = _calculateBearing(currentEst, b.location!);
-
-          // Di chuyển điểm ước lượng về phía P (hoặc ra xa P)
-          // Ta cần tính vector di chuyển. Vì đây là Lat/Lng, ta dùng xấp xỉ nhỏ.
-          
-          // Tính thành phần dịch chuyển (Vector addition)
-          // Di chuyển một đoạn = error * learningRate về hướng bearingToP
           double moveDist = error * learningRate;
-          
-          // Để đơn giản hóa trong vòng lặp gradient, ta cộng dồn vector
-          // (Lưu ý: đây là vector lực, không phải tọa độ chính xác, nhưng đủ tốt để hội tụ)
           latShift += moveDist * cos(_toRadians(bearingToP));
           lngShift += moveDist * sin(_toRadians(bearingToP));
         }
-
-        // Trung bình hóa vector dịch chuyển
         double avgMoveLat = latShift / validBeacons.length;
         double avgMoveLng = lngShift / validBeacons.length;
-        
-        // Cập nhật vị trí mới bằng cách di chuyển điểm cũ
-        // Tổng hợp lực di chuyển
         double totalMoveDist = sqrt(avgMoveLat*avgMoveLat + avgMoveLng*avgMoveLng);
         double moveBearing = _toDegrees(atan2(avgMoveLng, avgMoveLat));
 
-        if (totalMoveDist > 0.0001) { // Chỉ di chuyển nếu lực đủ lớn
+        if (totalMoveDist > 0.0001) { 
            currentEst = _computeOffset(currentEst, totalMoveDist, moveBearing);
         }
-
-        learningRate *= 0.99; // Giảm dần tốc độ học
+        learningRate *= 0.99;
       }
 
       double finalResidual = _calculateResidual(currentEst, validBeacons);
       setState(() {
         targetPoint = currentEst;
         resultDisplay = "${currentEst.latitude.toStringAsFixed(6)}, ${currentEst.longitude.toStringAsFixed(6)}";
-        accuracyInfo = "Sai số (Haversine): ±${finalResidual.toStringAsFixed(2)}m";
+        accuracyInfo = "Sai số: ±${finalResidual.toStringAsFixed(2)}m";
       });
       _mapController.move(currentEst, 16);
-
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
   double _calculateResidual(LatLng target, List<Beacon> validOnes) {
     double totalDiff = 0;
     for (var b in validOnes) {
-      double realDist = _haversineDistance(target, b.location!); // Dùng Haversine kiểm tra lại
+      double realDist = _haversineDistance(target, b.location!);
       double inputDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
       totalDiff += (realDist - inputDist).abs();
     }
     return totalDiff / validOnes.length;
   }
-  // ---------------------------------------------------
 
   void _saveCurrentTarget() {
     if (targetPoint == null) return;
@@ -464,11 +461,12 @@ class _MockAppState extends State<MockApp> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("1. Nhấn vào ô P1: Lấy vị trí thật (GPS)."),
-              Text("2. Nhập khoảng cách P1 và Nhấn P2: Tạo điểm ngẫu nhiên cách P1."),
-              Text("3. Nút Play xanh: Bắt đầu Mock GPS."),
-              Text("4. Nút Số 1 (Teal): Lấy kết quả làm P1 và reset."),
+              Text("1. Nhấn vào ô P1: Lấy vị trí GPS thật."),
+              Text("2. Nhập khoảng cách P1 -> Nhấn P2: Tạo điểm ngẫu nhiên."),
+              Text("3. Play (Xanh): Mock GPS tại P đang chọn."),
+              Text("4. Nút '1' (Teal): Lấy kết quả làm P1 mới (Reset)."),
               Text("5. Nút List (+): Gán kết quả vào P tiếp theo."),
+              Text("6. Bản đồ sẽ tự động lưu offline khi xem."),
             ],
           ),
         ),
@@ -489,7 +487,6 @@ class _MockAppState extends State<MockApp> {
               padding: const EdgeInsets.all(8), color: Colors.white,
               child: Column(
                 children: [
-                  // --- TOP BAR ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -500,7 +497,7 @@ class _MockAppState extends State<MockApp> {
                           child: ChoiceChip(
                             label: Text(unit, style: const TextStyle(fontSize: 10)), 
                             selected: selectedUnit == unit, 
-                            onSelected: (val) => setState(() => selectedUnit = unit)
+                            onSelected: (val) => _saveUnit(unit),
                           ),
                         )).toList(),
                       ),
@@ -511,7 +508,6 @@ class _MockAppState extends State<MockApp> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // --- BEACONS LIST (ĐÃ XÓA NÚT GPS) ---
                   SizedBox(
                     height: 70,
                     child: ListView.builder(
@@ -546,7 +542,6 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // --- INFO DISPLAY ---
                   GestureDetector(
                     onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
                     child: Column(
@@ -557,7 +552,6 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const Divider(height: 10),
-                  // --- CONTROL BUTTONS ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -568,7 +562,7 @@ class _MockAppState extends State<MockApp> {
                       
                       if (targetPoint != null)
                          Tooltip(
-                           message: "Bắt đầu lại với kết quả là P1",
+                           message: "Lấy kết quả làm P1 (Reset)",
                            child: IconButton(
                              icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28),
                              onPressed: _restartWithResultAsP1,
@@ -577,7 +571,7 @@ class _MockAppState extends State<MockApp> {
 
                       if (targetPoint != null)
                          Tooltip(
-                           message: "Gán kết quả vào P trống tiếp theo",
+                           message: "Gán vào P trống tiếp theo",
                            child: IconButton(
                              icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28),
                              onPressed: _assignResultToNextP,
@@ -603,7 +597,6 @@ class _MockAppState extends State<MockApp> {
               ),
             ),
             
-            // --- MAP ---
             Expanded(
               child: Stack(
                 children: [
@@ -612,6 +605,8 @@ class _MockAppState extends State<MockApp> {
                     options: MapOptions(
                       initialCenter: const LatLng(10.7626, 106.6601),
                       initialZoom: 13,
+                      minZoom: 4.0, 
+                      maxZoom: 18.0, 
                       onTap: (_, latlng) {
                         if (selectedIndex != null && !isMockingTarget) {
                           setState(() { beacons[selectedIndex!].location = latlng; });
@@ -622,7 +617,10 @@ class _MockAppState extends State<MockApp> {
                     children: [
                       TileLayer(
                         urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.example.mockapp_fix', 
+                        userAgentPackageName: 'com.example.mockapp_fix',
+                        tileProvider: CachedTileProvider(
+                          store: _mapCacheStore,
+                        ),
                       ),
                       MarkerLayer(
                         markers: [
@@ -707,17 +705,13 @@ class _MockAppState extends State<MockApp> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Tọa độ (Nhấn giữ để copy):", style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 5),
+            const Text("Tọa độ:", style: TextStyle(fontSize: 12, color: Colors.grey)),
             GestureDetector(
               onLongPress: () {
                 Clipboard.setData(ClipboardData(text: coords));
-                _showMsg("Đã copy tọa độ!");
+                _showMsg("Đã copy!");
               },
-              child: Text(
-                coords,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.red),
-              ),
+              child: Text(coords, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.red)),
             ),
           ],
         ),
