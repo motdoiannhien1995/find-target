@@ -21,6 +21,7 @@ dependencies:
   shared_preferences: ^2.2.2
   url_launcher: ^6.3.2
   rename: ^3.1.0
+  flutter_overlay_window: ^0.5.0 # Kiểm tra phiên bản mới nhất trên pub.dev
 
 dev_dependencies:
   flutter_test:
