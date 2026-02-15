@@ -21,12 +21,12 @@ dependencies:
   http: ^1.1.0
 
   # --- BỘ THƯ VIỆN CACHE (ĐÃ CHỈNH VERSION ĐỂ KHỚP NHAU) ---
-  flutter_map_cache: ^1.4.0  
+  flutter_map_cache: ^1.5.2  
   dio: ^5.3.0                
-  dio_cache_interceptor: ^3.5.0 
+  dio_cache_interceptor: ^3.5.1 
   # 👇 Đã hạ xuống 1.2.3 theo yêu cầu của Flutter 👇
   dio_cache_interceptor_file_store: ^1.2.3
-  path_provider: ^2.1.1      
+  path_provider: ^2.1.5      
 
   # --- KHÁC ---
   rename: ^3.1.0
