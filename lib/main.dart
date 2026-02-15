@@ -208,11 +208,14 @@ class _MockAppState extends State<MockApp> {
       selectedIndex = targetIndex;
       isMockingTarget = false;
       
-      // 3. Di chuyển map đến đó
+      // 3. Nếu đang có marker tìm kiếm trùng vị trí, xóa nó đi để tránh trùng lặp
+      searchMarker = null;
+      
+      // 4. Di chuyển map đến đó
       _mapController.move(location, 17);
     });
 
-    // 4. CHẠY MOCK NGAY LẬP TỨC
+    // 5. CHẠY MOCK NGAY LẬP TỨC
     _setMock(location.latitude, location.longitude);
     _showMsg("Đã gán và chạy Mock tại P${targetIndex + 1}");
   }
@@ -279,6 +282,61 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
+  // --- LOGIC MỚI V5.2: RESET P THEO HÀNG XÓM ---
+  Future<void> _resetCurrentBeacon() async {
+    if (selectedIndex == null) {
+      _showMsg("Chưa chọn điểm P nào để reset!");
+      return;
+    }
+    
+    int index = selectedIndex!;
+
+    // 1. Tìm điểm P khác (Hàng xóm/Trung tâm) có khoảng cách nhỏ nhất
+    int bestRefIndex = -1;
+    double minRefDist = double.infinity; // Khoảng cách của P hàng xóm
+
+    for (int i = 0; i < beacons.length; i++) {
+      if (i == index) continue; // Bỏ qua chính nó
+      if (beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
+         double? d = double.tryParse(beacons[i].controller.text);
+         if (d != null && d > 0 && d < minRefDist) {
+           minRefDist = d; // Lấy khoảng cách của P hàng xóm
+           bestRefIndex = i; // Lấy P hàng xóm làm tâm
+         }
+      }
+    }
+
+    LatLng newPos;
+    // 2. Tính toán vị trí mới
+    if (bestRefIndex != -1) {
+      // Có hàng xóm -> Random vị trí mới
+      // Tâm: Vị trí của P hàng xóm
+      // Bán kính: Khoảng cách nhập trong P hàng xóm (minRefDist)
+      double distMeters = minRefDist * unitToMeter[selectedUnit]!;
+      newPos = _calculateRandomPoint(beacons[bestRefIndex].location!, distMeters);
+      _showMsg("Đã tạo lại P${index+1} xoay quanh P${bestRefIndex+1}");
+    } else {
+      // Không có hàng xóm -> Lấy lại GPS thật
+      Position p = await Geolocator.getCurrentPosition();
+      newPos = LatLng(p.latitude, p.longitude);
+      _showMsg("Không có P làm tâm, lấy lại GPS thật");
+    }
+
+    // 3. Cập nhật và XÓA DỮ LIỆU CŨ
+    setState(() {
+      beacons[index].location = newPos;
+      beacons[index].controller.clear(); // Xóa dữ liệu đã nhập trong P này
+      
+      targetPoints.clear();
+      resultDisplay = "P${index+1} đã làm mới";
+      accuracyInfo = "Dữ liệu đã reset";
+      accuracyColor = Colors.orange;
+    });
+
+    _mapController.move(newPos, _mapController.camera.zoom);
+    _setMock(newPos.latitude, newPos.longitude);
+  }
+
   void _confirmDeleteBeacon(int index) {
     showDialog(
       context: context,
@@ -333,9 +391,28 @@ class _MockAppState extends State<MockApp> {
     });
   }
 
+  // --- LOGIC: RESET P1 LÀ TỌA ĐỘ ĐANG CHẠY ---
   void _restartWithResultAsP1() {
-    if (targetPoints.isEmpty) return;
-    LatLng newStart = targetPoints.isNotEmpty ? targetPoints[isMockingTarget ? mockingTargetIndex : 0] : targetPoints[0];
+    // Xác định tọa độ đang chạy (Active Point)
+    LatLng? newStart;
+    
+    // Ưu tiên 1: Đang Mock Target
+    if (isMockingTarget && targetPoints.isNotEmpty) {
+      newStart = targetPoints[mockingTargetIndex];
+    } 
+    // Ưu tiên 2: Đang Mock P (Beacon)
+    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
+      newStart = beacons[selectedIndex!].location;
+    }
+    // Ưu tiên 3: Nếu có kết quả tính toán (Fallback)
+    else if (targetPoints.isNotEmpty) {
+      newStart = targetPoints[0];
+    }
+
+    if (newStart == null) {
+      _showMsg("Chưa có tọa độ nào để gán!");
+      return;
+    }
     
     _stopMock();
     setState(() {
@@ -350,7 +427,7 @@ class _MockAppState extends State<MockApp> {
     });
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã lấy kết quả làm gốc P1!");
+    _showMsg("Đã lấy vị trí đang chạy làm gốc P1!");
   }
 
   LatLng _calculateRandomPoint(LatLng start, double distanceMeters) {
@@ -664,23 +741,46 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
+  // --- LOGIC: LƯU TỌA ĐỘ ĐANG CHẠY ---
   void _saveCurrentTarget() {
-    if (targetPoints.isEmpty) return;
-    LatLng pointToSave = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
+    // Xác định tọa độ cần lưu (Active Point)
+    LatLng? pointToSave;
+    String defaultName = "";
 
-    TextEditingController nameCtrl = TextEditingController(text: "Mục tiêu ${savedTargets.length + 1}");
+    // Ưu tiên 1: Nếu đang Mock Target (Kết quả tính toán)
+    if (isMockingTarget && targetPoints.isNotEmpty) {
+      pointToSave = targetPoints[mockingTargetIndex];
+      defaultName = "Mục tiêu ${savedTargets.length + 1}";
+    } 
+    // Ưu tiên 2: Nếu đang Mock P (Beacon)
+    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
+      pointToSave = beacons[selectedIndex!].location;
+      defaultName = "Điểm P${selectedIndex! + 1}";
+    }
+    // Ưu tiên 3: Nếu có kết quả nhưng không mock (Lưu kết quả đầu tiên)
+    else if (targetPoints.isNotEmpty) {
+      pointToSave = targetPoints[0];
+      defaultName = "Mục tiêu ${savedTargets.length + 1}";
+    }
+
+    if (pointToSave == null) {
+      _showMsg("Không có tọa độ đang chạy để lưu!");
+      return;
+    }
+
+    TextEditingController nameCtrl = TextEditingController(text: defaultName);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Lưu điểm mục tiêu"),
+        title: const Text("Lưu vị trí hiện tại"),
         content: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Tên điểm")),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
           ElevatedButton(onPressed: () {
-            setState(() => savedTargets.add(SavedTarget(location: pointToSave, name: nameCtrl.text, timestamp: DateTime.now())));
+            setState(() => savedTargets.add(SavedTarget(location: pointToSave!, name: nameCtrl.text, timestamp: DateTime.now())));
             _saveData();
             Navigator.pop(ctx);
-            _showMsg("Đã lưu!");
+            _showMsg("Đã lưu: ${nameCtrl.text}");
           }, child: const Text("LƯU")),
         ],
       ),
@@ -746,6 +846,73 @@ class _MockAppState extends State<MockApp> {
           ),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
+      ),
+    );
+  }
+
+  // --- SHOW DIALOG CHO KẾT QUẢ TÌM KIẾM ---
+  void _showSearchOptions() {
+    if (searchMarker == null) return;
+    String coords = "${searchMarker!.latitude.toStringAsFixed(6)}, ${searchMarker!.longitude.toStringAsFixed(6)}";
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Vị trí tìm kiếm"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Tọa độ:", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            GestureDetector(
+               onLongPress: () { Clipboard.setData(ClipboardData(text: coords)); _showMsg("Đã copy!"); },
+               child: Text(coords, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.red)),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 35), 
+            tooltip: "Gán vào P & MOCK",
+            onPressed: () { 
+              Navigator.pop(ctx);
+              _assignSavedTargetToP(searchMarker!); 
+            }
+          ),
+          IconButton(
+            icon: const Icon(Icons.save, color: Colors.blue),
+            tooltip: "Lưu vào danh sách", 
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Lưu nhanh từ biến searchMarker
+              TextEditingController nameCtrl = TextEditingController(text: "Tìm kiếm ${savedTargets.length + 1}");
+              showDialog(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text("Lưu vị trí tìm kiếm"),
+                  content: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Tên điểm")),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c), child: const Text("HỦY")),
+                    ElevatedButton(onPressed: () {
+                      setState(() => savedTargets.add(SavedTarget(location: searchMarker!, name: nameCtrl.text, timestamp: DateTime.now())));
+                      _saveData();
+                      Navigator.pop(c);
+                      _showMsg("Đã lưu!");
+                    }, child: const Text("LƯU")),
+                  ],
+                ),
+              );
+            }
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, color: Colors.red),
+            tooltip: "Xóa tìm kiếm",
+            onPressed: () { 
+              setState(() => searchMarker = null);
+              Navigator.pop(ctx); 
+            }
+          ),
+        ],
       ),
     );
   }
@@ -836,9 +1003,9 @@ class _MockAppState extends State<MockApp> {
                         _stopMock();
                       }),
                       
-                      if (targetPoints.isNotEmpty)
+                      if (targetPoints.isNotEmpty || selectedIndex != null)
                          Tooltip(
-                           message: "Lấy kết quả làm P1 (Reset)",
+                           message: "Lấy vị trí đang chạy làm P1 (Reset)",
                            child: IconButton(
                              icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28),
                              onPressed: _restartWithResultAsP1,
@@ -854,7 +1021,7 @@ class _MockAppState extends State<MockApp> {
                            ),
                          ),
 
-                      if (targetPoints.isNotEmpty)
+                      if (targetPoints.isNotEmpty || selectedIndex != null)
                         IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
                       
                       IconButton(
@@ -863,6 +1030,15 @@ class _MockAppState extends State<MockApp> {
                         }),
                         icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
                       ),
+
+                      if (selectedIndex != null) // Chỉ hiện nút Reset P khi đang chọn P
+                        Tooltip(
+                          message: "Làm mới P theo hàng xóm tốt nhất",
+                          child: IconButton(
+                            icon: const Icon(Icons.refresh, color: Colors.orange, size: 28),
+                            onPressed: _resetCurrentBeacon,
+                          ),
+                        ),
                       
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
@@ -903,7 +1079,28 @@ class _MockAppState extends State<MockApp> {
                       MarkerLayer(
                         markers: [
                           if (myRealLocation != null) Marker(point: myRealLocation!, width: 20, height: 20, child: const CircleAvatar(backgroundColor: Colors.blue, radius: 4)),
-                          if (searchMarker != null) Marker(point: searchMarker!, width: 35, height: 35, child: const Icon(Icons.location_on, color: Colors.red, size: 35)),
+                          
+                          // --- UPDATED SEARCH MARKER ---
+                          if (searchMarker != null) 
+                            Marker(
+                              point: searchMarker!, 
+                              width: 60, height: 60, 
+                              child: GestureDetector(
+                                onTap: _showSearchOptions, // Thêm sự kiện Tap
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.location_on, color: Colors.red, size: 40),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)]),
+                                      child: const Text("Tìm kiếm", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.red)),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            ),
+
                           for (int i = 0; i < beacons.length; i++)
                             if (beacons[i].location != null)
                               Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
@@ -1058,6 +1255,14 @@ class _MockAppState extends State<MockApp> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 30), 
+            tooltip: "MOCK ngay",
+            onPressed: () { 
+              Navigator.pop(ctx); 
+              _assignSavedTargetToP(savedTargets[index].location); 
+            }
+          ),
           IconButton(icon: const Icon(Icons.directions, color: Colors.orange), onPressed: () { Navigator.pop(ctx); _openNavigation(savedTargets[index].location); }),
           IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(ctx); _editTargetName(index); }),
           IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
@@ -1115,4 +1320,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-} ///// hoàn hảo
+} /// done nhé
