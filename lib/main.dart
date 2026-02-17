@@ -546,7 +546,7 @@ class _MockAppState extends State<MockApp> {
               displayMsg = "TÌM THẤY K";
               infoMsg = "Giao điểm P1-P2";
               infoColor = Colors.green;
-              results = roots; 
+              results = roots; // Trả về cả 2 giao điểm nếu chỉ có 2 P
            }
         } else {
            // 3 điểm trở lên
@@ -698,6 +698,7 @@ class _MockAppState extends State<MockApp> {
     int index = selectedIndex!;
 
     // --- LOGIC MỚI: NÚT RESET LÀM CÔNG TẮC K1 <-> K2 (CHO P3) ---
+    // Điều kiện: Đang thao tác P3 (index 2) VÀ P1, P2 đã có đủ thông tin
     if (index == 2 && beacons.length >= 3) {
        var b1 = beacons[0];
        var b2 = beacons[1];
@@ -709,9 +710,10 @@ class _MockAppState extends State<MockApp> {
            List<LatLng> roots = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
 
            if (roots.length == 2) {
+              // Có 2 giao điểm K1, K2. Kiểm tra P3 đang ở gần cái nào hơn để đổi
               LatLng k1 = roots[0];
               LatLng k2 = roots[1];
-              LatLng currentP3 = beacons[index].location ?? k1;
+              LatLng currentP3 = beacons[index].location ?? k1; // Nếu null thì coi như k1
 
               double dist1 = _haversineDistance(currentP3, k1);
               double dist2 = _haversineDistance(currentP3, k2);
@@ -719,22 +721,22 @@ class _MockAppState extends State<MockApp> {
               LatLng newPos;
               String msg;
               if (dist1 < dist2) {
-                 newPos = k2; 
+                 newPos = k2; // Đang ở K1 -> Sang K2
                  msg = "Đã chuyển P3 sang K2";
               } else {
-                 newPos = k1; 
+                 newPos = k1; // Đang ở K2 -> Sang K1
                  msg = "Đã chuyển P3 sang K1";
               }
 
               setState(() {
                 beacons[index].location = newPos;
-                beacons[index].controller.clear(); 
-                targetPoints.clear(); 
+                beacons[index].controller.clear(); // Xóa nhập liệu cũ
+                targetPoints.clear(); // Xóa điểm đích cũ vì P3 thay đổi
               });
               _setMock(newPos.latitude, newPos.longitude);
               _mapController.move(newPos, 17);
               _showMsg(msg);
-              return; 
+              return; // Kết thúc, không chạy logic reset cũ
            }
        }
     }
@@ -1134,83 +1136,48 @@ class _MockAppState extends State<MockApp> {
                             icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                             onPressed: () {
                               setState(() {
-                                // --- LOGIC MỚI: DÙNG TRỌNG TÀI K ĐỂ CHỌN GIAO ĐIỂM ---
+                                // --- LOGIC MỚI: TÍNH K -> XÓA XA NHẤT -> THÊM K VÀO ---
                                 
                                 // BƯỚC 1: Kiểm tra xem có đủ dữ liệu để tính K không (ít nhất 3 điểm)
                                 if (beacons.length >= 3) {
-                                  // Tính K tham chiếu (Reference K) từ 3 điểm
-                                  LatLng? referenceK = _internalCalculateBestFit();
+                                  // Tính toán vị trí K tối ưu dựa trên các điểm hiện tại (trước khi thêm/xóa)
+                                  LatLng? bestK = _internalCalculateBestFit();
 
-                                  if (referenceK != null) {
-                                      // BƯỚC 2: Tìm điểm P nào cách K tham chiếu xa nhất (điểm sai số)
+                                  if (bestK != null) {
+                                      // BƯỚC 2: Tìm điểm P nào cách K xa nhất (điểm sai số lớn nhất)
                                       int worstIndex = -1;
                                       double maxDist = -1;
+                                      
                                       for (int k = 0; k < beacons.length; k++) {
                                         if (beacons[k].location != null) {
-                                          double d = _haversineDistance(beacons[k].location!, referenceK);
-                                          if (d > maxDist) { maxDist = d; worstIndex = k; }
+                                          double d = _haversineDistance(beacons[k].location!, bestK);
+                                          if (d > maxDist) {
+                                            maxDist = d;
+                                            worstIndex = k;
+                                          }
                                         }
                                       }
 
-                                      // BƯỚC 3: Xác định 2 điểm còn lại (2 điểm tốt)
-                                      List<Beacon> bestTwo = [];
-                                      for (int k = 0; k < beacons.length; k++) {
-                                         if (k != worstIndex) bestTwo.add(beacons[k]);
-                                      }
-
-                                      // BƯỚC 4: Tính giao điểm chính xác của 2 điểm tốt này
-                                      LatLng finalPos;
-                                      if (bestTwo.length >= 2 && 
-                                          bestTwo[0].location != null && bestTwo[0].controller.text.isNotEmpty &&
-                                          bestTwo[1].location != null && bestTwo[1].controller.text.isNotEmpty) {
-                                          
-                                          var b1 = bestTwo[0];
-                                          var b2 = bestTwo[1];
-                                          try {
-                                            double r1 = double.parse(b1.controller.text) * unitToMeter[selectedUnit]!;
-                                            double r2 = double.parse(b2.controller.text) * unitToMeter[selectedUnit]!;
-                                            List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
-                                            
-                                            if (intersections.isEmpty) {
-                                               // Nếu không cắt nhau, dùng tạm referenceK
-                                               finalPos = referenceK;
-                                            } else if (intersections.length == 1) {
-                                               // Nếu tiếp xúc, lấy điểm đó
-                                               finalPos = intersections[0];
-                                            } else {
-                                               // BƯỚC 5: Nếu cắt 2 điểm, dùng referenceK để chọn điểm gần hơn
-                                               double d1 = _haversineDistance(intersections[0], referenceK);
-                                               double d2 = _haversineDistance(intersections[1], referenceK);
-                                               // Chọn giao điểm gần K tham chiếu nhất
-                                               finalPos = (d1 < d2) ? intersections[0] : intersections[1];
-                                            }
-                                          } catch(e) {
-                                            finalPos = referenceK; // Fallback nếu lỗi parse
-                                          }
-                                      } else {
-                                          finalPos = referenceK; // Fallback nếu không đủ 2 điểm tốt
-                                      }
-
-                                      // BƯỚC 6: Xóa điểm xa nhất, thêm điểm mới
+                                      // BƯỚC 3: Xóa điểm xa nhất đó đi
                                       if (worstIndex != -1) {
                                         beacons[worstIndex].dispose();
                                         beacons.removeAt(worstIndex);
                                       }
 
-                                      // Thêm điểm P mới (chính là giao điểm đã được chọn lọc)
-                                      beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length]));
+                                      // BƯỚC 4: Thêm điểm P mới chính là vị trí K vừa tính được
+                                      beacons.add(Beacon(location: bestK, color: colorPalette[beacons.length % colorPalette.length]));
                                       
-                                      // Mock & UI
+                                      // BƯỚC 5: Mock & UI
                                       selectedIndex = beacons.length - 1;
                                       targetPoints.clear();
                                       isMockingTarget = false;
                                       
-                                      _setMock(finalPos.latitude, finalPos.longitude);
-                                      _mapController.move(finalPos, 17);
-                                      _requestFocus(beacons.length - 1); 
+                                      _setMock(bestK.latitude, bestK.longitude);
+                                      _mapController.move(bestK, 17);
+                                      _requestFocus(beacons.length - 1); // Focus để nhập liệu luôn
                                       
-                                      _showMsg("Đã chọn giao điểm chuẩn nhất và loại P sai số!");
-                                      return; // Dừng lại
+                                      _showMsg("Đã thay thế P xa nhất bằng K vừa tính!");
+                                      return; // Dừng lại, không chạy logic phía dưới nữa
                                   }
                                 }
 
@@ -1218,18 +1185,22 @@ class _MockAppState extends State<MockApp> {
                                 LatLng? finalPos; 
                                 bool autoPlaced = false;
 
-                                // Tự động tính K1 nếu có 2 điểm
+                                // 1. TỰ ĐỘNG TÍNH VỊ TRÍ K1 (NẾU ĐÃ CÓ P1, P2)
                                 if (beacons.length >= 2) {
                                   var b1 = beacons[0];
                                   var b2 = beacons[1];
+
                                   if (b1.location != null && b1.controller.text.isNotEmpty &&
                                       b2.location != null && b2.controller.text.isNotEmpty) {
+                                    
                                     try {
                                       double r1 = double.parse(b1.controller.text) * unitToMeter[selectedUnit]!;
                                       double r2 = double.parse(b2.controller.text) * unitToMeter[selectedUnit]!;
+
                                       List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+                                      
                                       if (intersections.isNotEmpty) {
-                                        finalPos = intersections[0];
+                                        finalPos = intersections[0]; // K1
                                         autoPlaced = true;
                                         _showMsg("Đã tạo P${beacons.length + 1} tại giao điểm K1 (tự động)");
                                       }
@@ -1237,7 +1208,7 @@ class _MockAppState extends State<MockApp> {
                                   }
                                 }
                                 
-                                // Nếu không tự động được thì tính cạnh bên
+                                // 2. NẾU KHÔNG TỰ ĐỘNG ĐƯỢC -> TÍNH CẠNH BÊN
                                 if (!autoPlaced) {
                                   int newIndex = beacons.length; 
                                   if (newIndex > 0) {
@@ -1254,7 +1225,7 @@ class _MockAppState extends State<MockApp> {
                                   }
                                 }
 
-                                // Thêm vào list và mock
+                                // 3. THÊM VÀO LIST & CHẠY MOCK NGAY LẬP TỨC
                                 if (finalPos != null) {
                                   beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length]));
                                   selectedIndex = beacons.length - 1;
@@ -1444,4 +1415,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-}  ///////// ok chuẩn rồi nhé từ 2k lọc ra k chuẩn
+}  ///// k 3 điểm (chuẩn)
