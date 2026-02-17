@@ -133,7 +133,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                     });
                   }
                 } else {
-                   if (mounted) setState(() => _bgColor = Colors.grey);
+                    if (mounted) setState(() => _bgColor = Colors.grey);
                 }
 
                 if (mounted) setState(() => _isLoading = false);
@@ -199,7 +199,7 @@ class Beacon {
   int resetStep = 0; 
   String unit; 
    
-  Beacon({this.location, String dist = "", Color? color, this.unit = 'ft'}) 
+  Beacon({this.location, String dist = "", Color? color, this.unit = 'm'}) 
       : controller = TextEditingController(text: dist),
         focusNode = FocusNode(),
         color = color ?? Colors.blue; 
@@ -248,13 +248,14 @@ class _MockAppState extends State<MockApp> {
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _mockTimer;
 
-  // Khởi tạo Beacon đầu tiên
-  List<Beacon> beacons = [Beacon(color: Colors.blue, unit: 'ft')];
+  // [EDITED] Mặc định là 'm'
+  List<Beacon> beacons = [Beacon(color: Colors.blue, unit: 'm')];
   List<SavedTarget> savedTargets = [];
   
-  String defaultUnit = 'ft'; 
+  // [EDITED] Đổi thứ tự và mặc định
+  String defaultUnit = 'm'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
-  final List<String> availableUnits = ['ft', 'mi', 'm', 'km'];
+  final List<String> availableUnits = ['m', 'km', 'ft', 'mi'];
 
   int? selectedIndex; 
   List<LatLng> targetPoints = [];
@@ -299,11 +300,8 @@ class _MockAppState extends State<MockApp> {
     double inputVal = double.tryParse(b.controller.text) ?? 0;
     if (inputVal == 0) return 0;
 
-    // Nếu là km hoặc mi, cộng thêm 0.5
-    if (b.unit == 'km' || b.unit == 'mi') {
-      inputVal += 0.5;
-    }
-
+    // [EDITED] Đã xóa logic cộng thêm 0.5 cho km/mi
+    // Giữ nguyên giá trị nhập vào nhân với hệ số chuyển đổi
     return inputVal * unitToMeter[b.unit]!;
   }
 
@@ -516,38 +514,32 @@ class _MockAppState extends State<MockApp> {
     return totalError;
   }
 
-  // --- HÀM TÍNH TOÁN K (ĐÃ SỬA LỖI) ---
   LatLng? _internalCalculateBestFit() {
-     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
-     if (validBeacons.length < 2) return null;
+      var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
+      if (validBeacons.length < 2) return null;
 
-     LatLng p1 = validBeacons[0].location!;
-     LatLng p2 = validBeacons[1].location!;
-     double r1 = _getRadiusInMeters(validBeacons[0]);
-     double r2 = _getRadiusInMeters(validBeacons[1]);
+      LatLng p1 = validBeacons[0].location!;
+      LatLng p2 = validBeacons[1].location!;
+      double r1 = _getRadiusInMeters(validBeacons[0]);
+      double r2 = _getRadiusInMeters(validBeacons[1]);
 
-     // Tính cả 2 giao điểm
-     var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
-     LatLng bestStartNode;
-     
-     if (roots.isEmpty) {
-       // Nếu không cắt nhau, lấy trung bình cộng làm điểm bắt đầu
-       double sLat = 0, sLng = 0;
-       for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
-       bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
-     } else {
-       // NẾU CÓ 2 GIAO ĐIỂM, CHỌN ĐIỂM NÀO SAI SỐ THẤP HƠN VỚI TẤT CẢ CÁC P CÒN LẠI
-       if (roots.length == 2 && validBeacons.length >= 3) {
-          double err1 = _calculateTotalError(roots[0], validBeacons);
-          double err2 = _calculateTotalError(roots[1], validBeacons);
-          bestStartNode = (err1 < err2) ? roots[0] : roots[1];
-       } else {
-          bestStartNode = roots[0];
-       }
-     }
-
-     // Chạy tối ưu hóa từ điểm xuất phát tốt nhất đã chọn
-     return _optimizePoint(bestStartNode, validBeacons);
+      var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
+      LatLng bestStartNode;
+      
+      if (roots.isEmpty) {
+        double sLat = 0, sLng = 0;
+        for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
+        bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
+      } else {
+        if (roots.length == 2 && validBeacons.length >= 3) {
+           double err1 = _calculateTotalError(roots[0], validBeacons);
+           double err2 = _calculateTotalError(roots[1], validBeacons);
+           bestStartNode = (err1 < err2) ? roots[0] : roots[1];
+        } else {
+           bestStartNode = roots[0];
+        }
+      }
+      return _optimizePoint(bestStartNode, validBeacons);
   }
 
   void _calculateTrilateration() {
@@ -577,12 +569,13 @@ class _MockAppState extends State<MockApp> {
            var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
            if (roots.isEmpty) {
               displayMsg = "KHÔNG CẮT NHAU";
-              infoMsg = "Sai khoảng cách (đã bù sai số)";
+              infoMsg = "Sai khoảng cách";
               infoColor = Colors.red;
               results = [];
            } else {
               displayMsg = "TÌM THẤY K";
-              infoMsg = "Đã cộng thêm 0.5 cho mi/km";
+              // [EDITED] Thông báo trung thực hơn
+              infoMsg = "Đã tính toán theo đơn vị ${validBeacons[0].unit}";
               infoColor = Colors.green;
               results = roots;
            }
@@ -634,7 +627,7 @@ class _MockAppState extends State<MockApp> {
 
   void _assignSavedTargetToP(LatLng location) {
     int targetIndex = -1;
-    String unitToUse = 'ft'; 
+    String unitToUse = 'm'; // [EDITED]
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
     for (int i = 0; i < beacons.length; i++) {
@@ -714,7 +707,7 @@ class _MockAppState extends State<MockApp> {
           double distMeters = _getRadiusInMeters(beacons[bestReferenceIndex]);
           double optimalBearing = _calculateOptimalBearing(baseLoc, index);
           finalPos = _calculatePointFromBearing(baseLoc, distMeters, optimalBearing);
-          _showMsg("P${index + 1}: Tạo cách P${bestReferenceIndex + 1} (có bù sai số)");
+          _showMsg("P${index + 1}: Tạo cách P${bestReferenceIndex + 1} (không bù sai số)");
         }
       }
 
@@ -747,31 +740,31 @@ class _MockAppState extends State<MockApp> {
            List<LatLng> roots = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
 
            if (roots.length == 2) {
-              LatLng k1 = roots[0];
-              LatLng k2 = roots[1];
-              LatLng currentP3 = beacons[index].location ?? k1; 
-              double dist1 = _haversineDistance(currentP3, k1);
-              double dist2 = _haversineDistance(currentP3, k2);
+             LatLng k1 = roots[0];
+             LatLng k2 = roots[1];
+             LatLng currentP3 = beacons[index].location ?? k1; 
+             double dist1 = _haversineDistance(currentP3, k1);
+             double dist2 = _haversineDistance(currentP3, k2);
 
-              LatLng newPos;
-              String msg;
-              if (dist1 < dist2) {
-                 newPos = k2; 
-                 msg = "Đã chuyển P3 sang K2";
-              } else {
-                 newPos = k1; 
-                 msg = "Đã chuyển P3 sang K1";
-              }
+             LatLng newPos;
+             String msg;
+             if (dist1 < dist2) {
+                newPos = k2; 
+                msg = "Đã chuyển P3 sang K2";
+             } else {
+                newPos = k1; 
+                msg = "Đã chuyển P3 sang K1";
+             }
 
-              setState(() {
-                beacons[index].location = newPos;
-                beacons[index].controller.clear(); 
-                targetPoints.clear(); 
-              });
-              _setMock(newPos.latitude, newPos.longitude);
-              _mapController.move(newPos, 17);
-              _showMsg(msg);
-              return; 
+             setState(() {
+               beacons[index].location = newPos;
+               beacons[index].controller.clear(); 
+               targetPoints.clear(); 
+             });
+             _setMock(newPos.latitude, newPos.longitude);
+             _mapController.move(newPos, 17);
+             _showMsg(msg);
+             return; 
            }
        }
     }
@@ -834,7 +827,8 @@ class _MockAppState extends State<MockApp> {
 
     if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
     
-    String unitP1 = beacons.isNotEmpty ? beacons[0].unit : 'ft';
+    // [EDITED] Mặc định là m
+    String unitP1 = beacons.isNotEmpty ? beacons[0].unit : 'm';
 
     _stopMock();
     setState(() {
@@ -857,7 +851,7 @@ class _MockAppState extends State<MockApp> {
     if (targetPoints.isEmpty) return;
     LatLng pointToUse = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
     int nextIndex = -1;
-    String unitToUse = 'ft';
+    String unitToUse = 'm'; // [EDITED]
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
     for (int i = 0; i < beacons.length; i++) {
@@ -1017,10 +1011,10 @@ class _MockAppState extends State<MockApp> {
         content: const SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text("1. Nhập khoảng cách cho các điểm P."),
-            Text("2. Nếu chọn mi hoặc km, hệ thống TỰ ĐỘNG CỘNG 0.5 để bù sai số làm tròn."),
-            Text("3. Thanh ở trên dùng để đổi đơn vị cho P đang nhập liệu hoặc đang Mock."),
-            Text("4. Nút (+) tạo P mới (Chỉ khi P hiện tại đã hoàn thành)."),
-            Text("5. NHẤN GIỮ NÚT NỔI để ĐÓNG ứng dụng."),
+            // [EDITED] Xóa dòng hướng dẫn về cộng 0.5
+            Text("2. Thanh ở trên dùng để đổi đơn vị cho P đang nhập liệu hoặc đang Mock."),
+            Text("3. Nút (+) tạo P mới. Nếu có >3P, nó sẽ tự động xóa P xa nhất và thay bằng K mới tính được."),
+            Text("4. NHẤN GIỮ NÚT NỔI để ĐÓNG ứng dụng."),
           ]),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
@@ -1113,9 +1107,9 @@ class _MockAppState extends State<MockApp> {
       int focusedIndex = beacons.indexWhere((b) => b.focusNode.hasFocus);
       
       if (focusedIndex != -1) {
-         beacons[focusedIndex].unit = unit;
+          beacons[focusedIndex].unit = unit;
       } 
-      else if (selectedIndex != null) {
+      else if (selectedIndex != null && selectedIndex! < beacons.length) { 
         beacons[selectedIndex!].unit = unit; 
       } 
       else {
@@ -1132,7 +1126,7 @@ class _MockAppState extends State<MockApp> {
     
     if (focusedIndex != -1) {
       activeUnitForChip = beacons[focusedIndex].unit;
-    } else if (selectedIndex != null) {
+    } else if (selectedIndex != null && selectedIndex! < beacons.length) { 
       activeUnitForChip = beacons[selectedIndex!].unit;
     }
 
@@ -1155,6 +1149,7 @@ class _MockAppState extends State<MockApp> {
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
+                            // [EDITED] Danh sách đơn vị đã được sắp xếp lại ở khai báo
                             children: availableUnits.map((unit) => Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 2),
                               child: ChoiceChip(
@@ -1182,7 +1177,7 @@ class _MockAppState extends State<MockApp> {
                             IconButton(
                              icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue),
                              onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
-                           ),
+                            ),
                         ],
                       )
                     ],
@@ -1208,7 +1203,8 @@ class _MockAppState extends State<MockApp> {
 
                               setState(() {
                                 // --- LOGIC MỚI: TÍNH K -> XÓA XA NHẤT -> THÊM K VÀO ---
-                                String defaultNewUnit = 'ft';
+                                // [YÊU CẦU] Logic thay thế P xa nhất bằng K
+                                String defaultNewUnit = 'm'; // [EDITED]
                                 if (beacons.isNotEmpty) {
                                   defaultNewUnit = beacons.last.unit;
                                 } else {
@@ -1224,6 +1220,7 @@ class _MockAppState extends State<MockApp> {
                                       
                                       for (int k = 0; k < beacons.length; k++) {
                                         if (beacons[k].location != null) {
+                                          // Tìm P có khoảng cách tới K là xa nhất
                                           double d = _haversineDistance(beacons[k].location!, bestK);
                                           if (d > maxDist) {
                                             maxDist = d;
@@ -1251,7 +1248,8 @@ class _MockAppState extends State<MockApp> {
                                       return; 
                                   }
                                 }
-
+                                
+                                // --- LOGIC CŨ (Nếu < 3 điểm hoặc không tìm được K) ---
                                 LatLng? finalPos; 
                                 bool autoPlaced = false;
 
@@ -1261,19 +1259,19 @@ class _MockAppState extends State<MockApp> {
 
                                   if (b1.location != null && b1.controller.text.isNotEmpty &&
                                       b2.location != null && b2.controller.text.isNotEmpty) {
-                                    
-                                    try {
-                                      double r1 = _getRadiusInMeters(b1);
-                                      double r2 = _getRadiusInMeters(b2);
+                                       
+                                      try {
+                                        double r1 = _getRadiusInMeters(b1);
+                                        double r2 = _getRadiusInMeters(b2);
 
-                                      List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
-                                      
-                                      if (intersections.isNotEmpty) {
-                                        finalPos = intersections[0]; // K1
-                                        autoPlaced = true;
-                                        _showMsg("Đã tạo P${beacons.length + 1} tại giao điểm K1 (tự động)");
-                                      }
-                                    } catch (e) {}
+                                        List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+                                        
+                                        if (intersections.isNotEmpty) {
+                                          finalPos = intersections[0]; // K1
+                                          autoPlaced = true;
+                                          _showMsg("Đã tạo P${beacons.length + 1} tại giao điểm K1 (tự động)");
+                                        }
+                                      } catch (e) {}
                                   }
                                 }
                                 
@@ -1282,13 +1280,13 @@ class _MockAppState extends State<MockApp> {
                                   if (newIndex > 0) {
                                      Beacon prevBeacon = beacons[newIndex - 1];
                                      if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                                           double? r = double.tryParse(prevBeacon.controller.text);
-                                           if (r != null && r > 0) {
-                                                double distMeters = _getRadiusInMeters(prevBeacon);
-                                                LatLng center = prevBeacon.location!;
-                                                double bearing = _calculateOptimalBearing(center, newIndex);
-                                                finalPos = _calculatePointFromBearing(center, distMeters, bearing);
-                                           }
+                                             double? r = double.tryParse(prevBeacon.controller.text);
+                                             if (r != null && r > 0) {
+                                                  double distMeters = _getRadiusInMeters(prevBeacon);
+                                                  LatLng center = prevBeacon.location!;
+                                                  double bearing = _calculateOptimalBearing(center, newIndex);
+                                                  finalPos = _calculatePointFromBearing(center, distMeters, bearing);
+                                             }
                                      }
                                   }
                                 }
@@ -1367,8 +1365,17 @@ class _MockAppState extends State<MockApp> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
+                      // --- NÚT XÓA TẤT CẢ (ĐÃ SỬA LỖI ĐỎ MÀN HÌNH) ---
                       IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
-                        setState(() { beacons = [Beacon(color: Colors.blue, unit: 'ft')]; targetPoints.clear(); searchMarker = null; resultDisplay = "0.000000, 0.000000"; accuracyInfo = "Chờ nhập liệu..."; accuracyColor = Colors.grey; });
+                        setState(() { 
+                          beacons = [Beacon(color: Colors.blue, unit: 'm')]; // [EDITED]
+                          targetPoints.clear(); 
+                          searchMarker = null; 
+                          resultDisplay = "0.000000, 0.000000"; 
+                          accuracyInfo = "Chờ nhập liệu..."; 
+                          accuracyColor = Colors.grey; 
+                          selectedIndex = 0; // FIX QUAN TRỌNG: Reset index ngay lập tức
+                        });
                         _stopMock();
                       }),
                       if (targetPoints.isNotEmpty || selectedIndex != null) IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
@@ -1412,7 +1419,7 @@ class _MockAppState extends State<MockApp> {
                       },
                       onLongPress: (_, latlng) {
                         int targetIndex = -1;
-                        String unitToUse = 'ft';
+                        String unitToUse = 'm'; // [EDITED]
                         if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
                         for (int i = 0; i < beacons.length; i++) {
