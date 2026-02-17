@@ -44,7 +44,6 @@ class InvincibleOverlay extends StatefulWidget {
 }
 
 class _InvincibleOverlayState extends State<InvincibleOverlay> {
-  // Đảm bảo tên này TRÙNG KHỚP 100% với applicationId trong build.gradle
   final String _myPackage = "com.khoa.fakegpstracetarget"; 
   String? _targetPackage;
   
@@ -72,7 +71,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 
   Future<void> _launchApp(String pkg) async {
-    // Cách 1: Dùng InstalledApps (Ưu tiên số 1)
     try {
       bool? success = await InstalledApps.startApp(pkg);
       if (success == true) return; 
@@ -80,7 +78,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       print("Cách 1 lỗi: $e");
     }
 
-    // Cách 2: Dùng Intent URL (Dự phòng)
     try {
       final Uri uri = Uri.parse(
           "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10000000;package=$pkg;end");
@@ -235,7 +232,7 @@ class _MockAppState extends State<MockApp> {
 
   List<Beacon> beacons = [Beacon(color: Colors.blue)];
   List<SavedTarget> savedTargets = [];
-  String selectedUnit = 'm'; 
+  String selectedUnit = 'ft'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
 
   int? selectedIndex; 
@@ -243,7 +240,7 @@ class _MockAppState extends State<MockApp> {
   LatLng? myRealLocation;
   LatLng? searchMarker; 
   String resultDisplay = "0.000000, 0.000000";
-  String accuracyInfo = "Chờ nhập dữ liệu...";
+  String accuracyInfo = "Chờ nhập liệu...";
   Color accuracyColor = Colors.grey; 
   bool isMockingTarget = false;
   int mockingTargetIndex = 0;
@@ -251,7 +248,7 @@ class _MockAppState extends State<MockApp> {
   String? targetAppPackage; 
 
   static const double earthRadius = 6371000.0;
-  static const double strictThreshold = 10.0; 
+  
   final List<Color> colorPalette = [Colors.orange, Colors.teal, Colors.pink, Colors.brown, Colors.indigo, Colors.lime];
 
   @override
@@ -301,7 +298,6 @@ class _MockAppState extends State<MockApp> {
                     _saveTargetApp(app.packageName!);
                     Navigator.pop(ctx);
                     _showMsg("Đã liên kết: ${app.name}");
-                    // Khi chọn xong, nếu chưa hiện thì hiện luôn
                     _showInvincibleOverlay(); 
                   },
                 );
@@ -313,23 +309,17 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg("Lỗi lấy danh sách app: $e"); }
   }
 
-  // --- [SỬA LỖI 2] BẤM LẦN 2 THÌ TẮT ---
   Future<void> _triggerOverlay() async {
     if (targetAppPackage == null) {
       _showMsg("Chưa chọn App! Vui lòng chọn App trước.");
       _pickTargetApp();
       return;
     }
-    
-    // Kiểm tra xem nút có đang hiện không
     bool isActive = await FlutterOverlayWindow.isActive();
-    
     if (isActive) {
-      // Đang hiện -> TẮT
       await FlutterOverlayWindow.closeOverlay();
       _showMsg("Đã tắt nút nổi");
     } else {
-      // Đang tắt -> BẬT
       await _showInvincibleOverlay();
       _showMsg("Đã bật nút nổi");
     }
@@ -337,7 +327,6 @@ class _MockAppState extends State<MockApp> {
 
   Future<void> _showInvincibleOverlay() async {
     if (await FlutterOverlayWindow.isActive()) return;
-    
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
       flag: OverlayFlag.defaultFlag, 
@@ -358,7 +347,6 @@ class _MockAppState extends State<MockApp> {
     }
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
-    // Bật overlay luôn khi mock (nếu chưa bật)
     _showInvincibleOverlay(); 
     if (mounted) {
       setState(() {
@@ -384,7 +372,206 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { print(e); }
   }
 
-  // --- CÁC HÀM UI PHỤ TRỢ ---
+  // ======================================================
+  // PHẦN THUẬT TOÁN TÍNH TOÁN
+  // ======================================================
+
+  double _toRadians(double degree) => degree * pi / 180.0;
+  double _toDegrees(double radian) => radian * 180.0 / pi;
+
+  double _haversineDistance(LatLng p1, LatLng p2) {
+    double dLat = _toRadians(p2.latitude - p1.latitude);
+    double dLon = _toRadians(p2.longitude - p1.longitude);
+    double lat1 = _toRadians(p1.latitude);
+    double lat2 = _toRadians(p2.latitude);
+    double a = pow(sin(dLat / 2), 2) + pow(sin(dLon / 2), 2) * cos(lat1) * cos(lat2);
+    double c = 2 * asin(sqrt(a));
+    return earthRadius * c;
+  }
+
+  double _calculateBearing(LatLng start, LatLng end) {
+    double startLat = _toRadians(start.latitude);
+    double startLng = _toRadians(start.longitude);
+    double endLat = _toRadians(end.latitude);
+    double endLng = _toRadians(end.longitude);
+    double dLng = endLng - startLng;
+    double y = sin(dLng) * cos(endLat);
+    double x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng);
+    double bearing = atan2(y, x);
+    return (_toDegrees(bearing) + 360) % 360; 
+  }
+
+  LatLng _calculatePointFromBearing(LatLng start, double distanceMeters, double bearingDegrees) {
+    double bearingRad = _toRadians(bearingDegrees); 
+    double startLat = _toRadians(start.latitude);
+    double startLng = _toRadians(start.longitude);
+    double distRatio = distanceMeters / earthRadius;
+    
+    double endLat = asin(sin(startLat) * cos(distRatio) + cos(startLat) * sin(distRatio) * cos(bearingRad));
+    double endLng = startLng + atan2(sin(bearingRad) * sin(distRatio) * cos(startLat), cos(distRatio) - sin(startLat) * sin(endLat));
+    return LatLng(_toDegrees(endLat), _toDegrees(endLng));
+  }
+
+  List<LatLng> _calculateTwoCircleIntersectionPrecise(LatLng p1, double r1, LatLng p2, double r2) {
+    double d = _haversineDistance(p1, p2);
+
+    if (d >= r1 + r2 || d <= (r1 - r2).abs() || d == 0) {
+      return []; 
+    }
+
+    double cosAlpha = (r1 * r1 + d * d - r2 * r2) / (2 * r1 * d);
+    cosAlpha = max(-1.0, min(1.0, cosAlpha));
+    double alphaRad = acos(cosAlpha);
+    double alphaDeg = _toDegrees(alphaRad);
+
+    double bearing12 = _calculateBearing(p1, p2);
+    double bearingK1 = bearing12 - alphaDeg;
+    double bearingK2 = bearing12 + alphaDeg;
+
+    LatLng k1 = _calculatePointFromBearing(p1, r1, bearingK1);
+    LatLng k2 = _calculatePointFromBearing(p1, r1, bearingK2);
+
+    return [k1, k2];
+  }
+
+  // --- THUẬT TOÁN TỐI ƯU HÓA ---
+  LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
+    LatLng currentPos = startPoint;
+    double stepSize = 0.001; 
+    double minStep = 0.0000001; 
+    int maxIterations = 3000; 
+    int iter = 0;
+
+    while (stepSize > minStep && iter < maxIterations) {
+      iter++;
+      LatLng bestNeighbor = currentPos;
+      double minError = _calculateTotalError(currentPos, beacons);
+      bool improved = false;
+
+      List<LatLng> neighbors = [
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude, currentPos.longitude + stepSize),
+        LatLng(currentPos.latitude, currentPos.longitude - stepSize),
+      ];
+
+      for (var p in neighbors) {
+        double err = _calculateTotalError(p, beacons);
+        if (err < minError) {
+          minError = err;
+          bestNeighbor = p;
+          improved = true;
+        }
+      }
+
+      if (improved) {
+        currentPos = bestNeighbor;
+      } else {
+        stepSize /= 2.0; 
+      }
+    }
+    return currentPos;
+  }
+
+  double _calculateTotalError(LatLng p, List<Beacon> beacons) {
+    double totalError = 0;
+    for (var b in beacons) {
+      double d = _haversineDistance(p, b.location!);
+      double r = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
+      totalError += pow(d - r, 2); 
+    }
+    return totalError;
+  }
+
+  // --- HÀM TÍNH TOÁN K (CHẠY NGẦM) ---
+  LatLng? _internalCalculateBestFit() {
+     var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
+     if (validBeacons.length < 2) return null;
+
+     LatLng p1 = validBeacons[0].location!;
+     LatLng p2 = validBeacons[1].location!;
+     double r1 = double.parse(validBeacons[0].controller.text) * unitToMeter[selectedUnit]!;
+     double r2 = double.parse(validBeacons[1].controller.text) * unitToMeter[selectedUnit]!;
+
+     // Tính giao điểm P1-P2 làm gốc
+     var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
+     LatLng startNode;
+     
+     if (roots.isNotEmpty) {
+       startNode = roots[0];
+     } else {
+       double sLat = 0, sLng = 0;
+       for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
+       startNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
+     }
+
+     // Tối ưu hóa từ gốc
+     return _optimizePoint(startNode, validBeacons);
+  }
+
+  // --- LOGIC TÍNH TOÁN CHÍNH (NÚT TÍNH) ---
+  void _calculateTrilateration() {
+    FocusScope.of(context).unfocus();
+    var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
+    
+    if (validBeacons.length < 2) { 
+      _showMsg("Cần ít nhất 2 điểm P để tính toán!");
+      setState(() { accuracyInfo = "Thiếu dữ liệu"; accuracyColor = Colors.red; });
+      return; 
+    }
+
+    try {
+      List<LatLng> results = [];
+      String displayMsg = "";
+      String infoMsg = "";
+      Color infoColor = Colors.black;
+
+      // Tính toán K tối ưu
+      LatLng? optimalK = _internalCalculateBestFit();
+
+      if (optimalK != null) {
+        if (validBeacons.length == 2) {
+           // Nếu chỉ có 2 điểm, kiểm tra lại xem có cắt không
+           LatLng p1 = validBeacons[0].location!;
+           LatLng p2 = validBeacons[1].location!;
+           double r1 = double.parse(validBeacons[0].controller.text) * unitToMeter[selectedUnit]!;
+           double r2 = double.parse(validBeacons[1].controller.text) * unitToMeter[selectedUnit]!;
+           var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
+           if (roots.isEmpty) {
+              displayMsg = "KHÔNG CẮT NHAU";
+              infoMsg = "Sai khoảng cách";
+              infoColor = Colors.red;
+              results = [];
+           } else {
+              displayMsg = "TÌM THẤY K";
+              infoMsg = "Giao điểm P1-P2";
+              infoColor = Colors.green;
+              results = roots; 
+           }
+        } else {
+           // 3 điểm trở lên
+           results = [optimalK];
+           displayMsg = "ĐA GIÁC LƯỢNG (3P+)";
+           infoMsg = "Đã tối ưu hóa vị trí";
+           infoColor = Colors.purple;
+        }
+      }
+
+      setState(() {
+          targetPoints = results;
+          resultDisplay = displayMsg;
+          accuracyInfo = infoMsg;
+          accuracyColor = infoColor;
+          if (results.isNotEmpty) {
+             _setMock(results[0].latitude, results[0].longitude, fromTarget: true, targetIndex: 0);
+          }
+      });
+    } catch (e) { 
+      _showMsg("Lỗi tính toán: $e"); 
+    }
+  }
+
+  // --- CÁC HÀM UI PHỤ TRỢ (GIỮ NGUYÊN) ---
   void _prevTarget() {
     if (targetPoints.isEmpty) return;
     int newIndex = mockingTargetIndex - 1;
@@ -432,6 +619,28 @@ class _MockAppState extends State<MockApp> {
     _requestFocus(targetIndex); 
     _setMock(location.latitude, location.longitude);
     _showMsg("Đã gán và chạy Mock tại P${targetIndex + 1}");
+  }
+
+  double _calculateOptimalBearing(LatLng center, int currentIndex) {
+    List<double> existingBearings = [];
+    for (int i = 0; i < beacons.length; i++) {
+      if (i == currentIndex) continue;
+      if (beacons[i].location != null && beacons[i].location != center) {
+        double b = _calculateBearing(center, beacons[i].location!);
+        existingBearings.add(b);
+      }
+    }
+    if (existingBearings.isEmpty) return Random().nextDouble() * 360.0;
+    existingBearings.sort();
+    double maxGap = 0;
+    double bestStartAngle = 0;
+    for (int i = 0; i < existingBearings.length; i++) {
+      double current = existingBearings[i];
+      double next = existingBearings[(i + 1) % existingBearings.length];
+      double gap = (next - current + 360) % 360;
+      if (gap > maxGap) { maxGap = gap; bestStartAngle = current; }
+    }
+    return (bestStartAngle + maxGap / 2) % 360;
   }
 
   Future<void> _smartSetLocation(int index) async {
@@ -487,6 +696,50 @@ class _MockAppState extends State<MockApp> {
   Future<void> _resetCurrentBeacon() async {
     if (selectedIndex == null) { _showMsg("Chưa chọn điểm P nào để reset!"); return; }
     int index = selectedIndex!;
+
+    // --- LOGIC MỚI: NÚT RESET LÀM CÔNG TẮC K1 <-> K2 (CHO P3) ---
+    if (index == 2 && beacons.length >= 3) {
+       var b1 = beacons[0];
+       var b2 = beacons[1];
+       if (b1.location != null && b1.controller.text.isNotEmpty &&
+           b2.location != null && b2.controller.text.isNotEmpty) {
+           
+           double r1 = double.parse(b1.controller.text) * unitToMeter[selectedUnit]!;
+           double r2 = double.parse(b2.controller.text) * unitToMeter[selectedUnit]!;
+           List<LatLng> roots = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+
+           if (roots.length == 2) {
+              LatLng k1 = roots[0];
+              LatLng k2 = roots[1];
+              LatLng currentP3 = beacons[index].location ?? k1;
+
+              double dist1 = _haversineDistance(currentP3, k1);
+              double dist2 = _haversineDistance(currentP3, k2);
+
+              LatLng newPos;
+              String msg;
+              if (dist1 < dist2) {
+                 newPos = k2; 
+                 msg = "Đã chuyển P3 sang K2";
+              } else {
+                 newPos = k1; 
+                 msg = "Đã chuyển P3 sang K1";
+              }
+
+              setState(() {
+                beacons[index].location = newPos;
+                beacons[index].controller.clear(); 
+                targetPoints.clear(); 
+              });
+              _setMock(newPos.latitude, newPos.longitude);
+              _mapController.move(newPos, 17);
+              _showMsg(msg);
+              return; 
+           }
+       }
+    }
+
+    // --- LOGIC CŨ: RESET VỀ CẠNH BÊN HOẶC GPS ---
     int bestRefIndex = -1;
     double minRefDist = double.infinity;
 
@@ -579,221 +832,6 @@ class _MockAppState extends State<MockApp> {
       }
     });
     _requestFocus(nextIndex); 
-  }
-
-  double _calculateOptimalBearing(LatLng center, int currentIndex) {
-    List<double> existingBearings = [];
-    for (int i = 0; i < beacons.length; i++) {
-      if (i == currentIndex) continue;
-      if (beacons[i].location != null && beacons[i].location != center) {
-        double b = _calculateBearing(center, beacons[i].location!);
-        existingBearings.add(b);
-      }
-    }
-    if (existingBearings.isEmpty) return Random().nextDouble() * 360.0;
-    existingBearings.sort();
-    double maxGap = 0;
-    double bestStartAngle = 0;
-    for (int i = 0; i < existingBearings.length; i++) {
-      double current = existingBearings[i];
-      double next = existingBearings[(i + 1) % existingBearings.length];
-      double gap = (next - current + 360) % 360;
-      if (gap > maxGap) { maxGap = gap; bestStartAngle = current; }
-    }
-    return (bestStartAngle + maxGap / 2) % 360;
-  }
-
-  double _toRadians(double degree) => degree * pi / 180.0;
-  double _toDegrees(double radian) => radian * 180.0 / pi;
-
-  LatLng _calculatePointFromBearing(LatLng start, double distanceMeters, double bearingDegrees) {
-    double bearingRad = bearingDegrees * (pi / 180); 
-    double startLat = start.latitude * (pi / 180);
-    double startLng = start.longitude * (pi / 180);
-    double distRatio = distanceMeters / earthRadius;
-    double endLat = asin(sin(startLat) * cos(distRatio) + cos(startLat) * sin(distRatio) * cos(bearingRad));
-    double endLng = startLng + atan2(sin(bearingRad) * sin(distRatio) * cos(startLat), cos(distRatio) - sin(startLat) * sin(endLat));
-    return LatLng(endLat * (180 / pi), endLng * (180 / pi));
-  }
-
-  Point<double> _latLngToXy(LatLng origin, LatLng p) {
-    double latAvg = _toRadians((origin.latitude + p.latitude) / 2);
-    double mPerLat = 111320.0; 
-    double mPerLng = 111320.0 * cos(latAvg); 
-    double dy = (p.latitude - origin.latitude) * mPerLat;
-    double dx = (p.longitude - origin.longitude) * mPerLng;
-    return Point(dx, dy);
-  }
-
-  LatLng _xyToLatLng(LatLng origin, double x, double y) {
-    double mPerLat = 111320.0;
-    double latNew = origin.latitude + (y / mPerLat);
-    double latAvg = _toRadians((origin.latitude + latNew) / 2);
-    double mPerLng = 111320.0 * cos(latAvg);
-    double lngNew = origin.longitude + (x / mPerLng);
-    return LatLng(latNew, lngNew);
-  }
-
-  double _haversineDistance(LatLng p1, LatLng p2) {
-    double dLat = _toRadians(p2.latitude - p1.latitude);
-    double dLon = _toRadians(p2.longitude - p1.longitude);
-    double lat1 = _toRadians(p1.latitude);
-    double lat2 = _toRadians(p2.latitude);
-    double a = pow(sin(dLat / 2), 2) + pow(sin(dLon / 2), 2) * cos(lat1) * cos(lat2);
-    double c = 2 * asin(sqrt(a));
-    return earthRadius * c;
-  }
-
-  double _calculateBearing(LatLng start, LatLng end) {
-    double startLat = _toRadians(start.latitude);
-    double startLng = _toRadians(start.longitude);
-    double endLat = _toRadians(end.latitude);
-    double endLng = _toRadians(end.longitude);
-    double dLng = endLng - startLng;
-    double y = sin(dLng) * cos(endLat);
-    double x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng);
-    double bearing = atan2(y, x);
-    return (_toDegrees(bearing) + 360) % 360; 
-  }
-
-  LatLng _computeOffset(LatLng from, double distance, double heading) {
-    double distRatio = distance / earthRadius;
-    double headingRad = _toRadians(heading);
-    double fromLat = _toRadians(from.latitude);
-    double fromLng = _toRadians(from.longitude);
-    double toLat = asin(sin(fromLat) * cos(distRatio) + cos(fromLat) * sin(distRatio) * cos(headingRad));
-    double toLng = fromLng + atan2(sin(headingRad) * sin(distRatio) * cos(fromLat), cos(distRatio) - sin(fromLat) * sin(toLat));
-    return LatLng(_toDegrees(toLat), _toDegrees(toLng));
-  }
-
-  List<LatLng> _calculateTwoCircleIntersection(LatLng p1, double r1, LatLng p2, double r2) {
-    Point<double> c1 = const Point(0, 0); 
-    Point<double> c2 = _latLngToXy(p1, p2);
-    double d = sqrt(pow(c2.x, 2) + pow(c2.y, 2));
-    if (d > r1 + r2 || d < (r1 - r2).abs() || d == 0) return []; 
-    double a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
-    double h = sqrt(max(0, r1 * r1 - a * a));
-    double x2 = c2.x * a / d;
-    double y2 = c2.y * a / d;
-    double x3_1 = x2 + h * c2.y / d;
-    double y3_1 = y2 - h * c2.x / d;
-    double x3_2 = x2 - h * c2.y / d;
-    double y3_2 = y2 + h * c2.x / d;
-    return [_xyToLatLng(p1, x3_1, y3_1), _xyToLatLng(p1, x3_2, y3_2)];
-  }
-
-  void _calculateTrilateration() {
-    FocusScope.of(context).unfocus();
-    var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
-    if (validBeacons.length < 2) { _showMsg("Cần ít nhất 2 điểm!"); return; }
-
-    try {
-      List<LatLng> results = [];
-      double finalResidual = 0;
-      bool isTwoPoints = false;
-
-      if (validBeacons.length == 2) {
-         double r1 = double.parse(validBeacons[0].controller.text) * unitToMeter[selectedUnit]!;
-         double r2 = double.parse(validBeacons[1].controller.text) * unitToMeter[selectedUnit]!;
-         results = _calculateTwoCircleIntersection(validBeacons[0].location!, r1, validBeacons[1].location!, r2);
-         if (results.isEmpty) {
-           setState(() { targetPoints = []; resultDisplay = "KHÔNG CẮT NHAU"; accuracyInfo = "Khoảng cách sai lệch"; accuracyColor = Colors.red; });
-           return;
-         }
-         isTwoPoints = true;
-         finalResidual = 0;
-      } 
-      else {
-        LatLng finalResult;
-        bool isShortRange = (selectedUnit == 'm' || selectedUnit == 'ft');
-        if (isShortRange) {
-          LatLng origin = validBeacons[0].location!;
-          List<Point<double>> points = [];
-          List<double> radii = [];
-          for (var b in validBeacons) {
-            points.add(_latLngToXy(origin, b.location!));
-            radii.add(double.parse(b.controller.text) * unitToMeter[selectedUnit]!);
-          }
-          double estX = 0, estY = 0;
-          for (var p in points) { estX += p.x; estY += p.y; }
-          estX /= points.length; estY /= points.length;
-          double learningRate = 0.2;
-          for (int i = 0; i < 5000; i++) {
-            double shiftX = 0, shiftY = 0;
-            for (int j = 0; j < points.length; j++) {
-              double dx = estX - points[j].x;
-              double dy = estY - points[j].y;
-              double currentDist = sqrt(dx*dx + dy*dy);
-              if (currentDist == 0) currentDist = 0.000001;
-              double error = currentDist - radii[j];
-              shiftX += -error * (dx / currentDist);
-              shiftY += -error * (dy / currentDist);
-            }
-            estX += shiftX * learningRate / points.length;
-            estY += shiftY * learningRate / points.length;
-            if (shiftX.abs() < 1e-10 && shiftY.abs() < 1e-10) break;
-            learningRate *= 0.995;
-          }
-          finalResult = _xyToLatLng(origin, estX, estY);
-          double totalRes = 0;
-          for (int i = 0; i < points.length; i++) {
-             double dist = sqrt(pow(estX - points[i].x, 2) + pow(estY - points[i].y, 2));
-             totalRes += (dist - radii[i]).abs();
-          }
-          finalResidual = totalRes / points.length;
-        } else {
-          double sumLat = 0, sumLng = 0;
-          for (var b in validBeacons) { sumLat += b.location!.latitude; sumLng += b.location!.longitude; }
-          LatLng currentEst = LatLng(sumLat / validBeacons.length, sumLng / validBeacons.length);
-          double learningRate = 0.5;
-          for (int i = 0; i < 2000; i++) {
-            double moveLat = 0, moveLng = 0; 
-            for (var b in validBeacons) {
-              double currentDist = _haversineDistance(currentEst, b.location!);
-              double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-              double error = currentDist - targetDist;
-              double bearingToB = _calculateBearing(currentEst, b.location!);
-              double moveDist = error * learningRate;
-              double rad = _toRadians(bearingToB);
-              moveLat += moveDist * cos(rad); moveLng += moveDist * sin(rad);
-            }
-            double totalMoveMeters = sqrt(moveLat*moveLat + moveLng*moveLng) / validBeacons.length;
-            double moveBearing = _toDegrees(atan2(moveLng, moveLat));
-            if (totalMoveMeters > 0.0001) { currentEst = _computeOffset(currentEst, totalMoveMeters, moveBearing); } else { break; }
-            learningRate *= 0.99;
-          }
-          finalResult = currentEst;
-          double totalRes = 0;
-          for (var b in validBeacons) {
-            double realDist = _haversineDistance(finalResult, b.location!);
-            double targetDist = double.parse(b.controller.text) * unitToMeter[selectedUnit]!;
-            totalRes += (realDist - targetDist).abs();
-          }
-          finalResidual = totalRes / validBeacons.length;
-        }
-        results.add(finalResult);
-      }
-
-      setState(() {
-        targetPoints = results;
-        if (isTwoPoints) {
-          resultDisplay = "TÌM THẤY 2 ĐIỂM";
-          accuracyInfo = "Đang chạy Mock Điểm K1...";
-          accuracyColor = Colors.orange;
-        } else {
-          bool isAccurate = finalResidual <= strictThreshold;
-          resultDisplay = "${results[0].latitude.toStringAsFixed(7)}, ${results[0].longitude.toStringAsFixed(7)}";
-          if (isAccurate) {
-             accuracyInfo = "Tuyệt đối (±${(finalResidual*100).toStringAsFixed(1)}cm)";
-             accuracyColor = Colors.green;
-          } else {
-             accuracyInfo = "CẢNH BÁO: Sai số ${(finalResidual).toStringAsFixed(2)}m!";
-             accuracyColor = Colors.red;
-          }
-        }
-      });
-      if (results.isNotEmpty) _setMock(results[0].latitude, results[0].longitude, fromTarget: true, targetIndex: 0);
-    } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
   // --- LOGIC TÌM KIẾM ---
@@ -944,11 +982,11 @@ class _MockAppState extends State<MockApp> {
         title: const Row(children: [Icon(Icons.help_outline, color: Colors.blue), SizedBox(width: 10), Text("Hướng dẫn")]),
         content: const SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text("1. Nhấn vào P(x): Lấy vị trí hoặc MOCK ngay."),
-            Text("2. NHẤN GIỮ BẢN ĐỒ: Tự gán vào P trống và chạy MOCK."),
-            Text("3. Nút Refresh: Di chuyển P theo 4 hướng cố định (Nhớ vị trí)."),
-            Text("4. Dấu (+): Thêm P mới. Nếu P cũ có dữ liệu -> Tự tính P mới và Mock ngay."),
-            Text("5. Nút Chat: Nhấn giữ để chọn App, nhấn 1 lần để HIỆN NÚT NỔI."),
+            Text("1. Nhập khoảng cách chính xác cho các điểm P (ft/m)."),
+            Text("2. Nhấn 'TÍNH':"),
+            Text("   - P1 và P2 luôn được dùng làm CHUẨN."),
+            Text("   - Nếu có P3 trở lên: Dùng để lọc xem K1 hay K2 đúng hơn."),
+            Text("3. Dùng nút mũi tên ở dưới để chuyển đổi giữa các kết quả."),
           ]),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
@@ -1035,7 +1073,7 @@ class _MockAppState extends State<MockApp> {
     );
   }
 
-  // --- BUILD UI (ĐÃ SỬA LỖI TRÀN VIỀN) ---
+  // --- BUILD UI ---
   @override
   Widget build(BuildContext context) {
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
@@ -1052,8 +1090,6 @@ class _MockAppState extends State<MockApp> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       IconButton(onPressed: _showInstructions, icon: const Icon(Icons.help_outline, color: Colors.blue)),
-                      
-                      // --- [FIX LỖI 1] BỌC VÀO EXPANDED ĐỂ KHÔNG BỊ TRÀN VIỀN ---
                       Expanded(
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -1069,14 +1105,13 @@ class _MockAppState extends State<MockApp> {
                           ),
                         ),
                       ),
-                      
                       Row(
                         children: [
                             GestureDetector(
                              onLongPress: _pickTargetApp, 
                              child: IconButton(
                               icon: Icon(Icons.chat_bubble, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey),
-                              onPressed: _triggerOverlay, // Bấm để Bật/Tắt
+                              onPressed: _triggerOverlay, 
                               tooltip: "Bật/Tắt Nút Nổi (Nhấn giữ để chọn App)",
                              ),
                             ),
@@ -1099,30 +1134,140 @@ class _MockAppState extends State<MockApp> {
                             icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                             onPressed: () {
                               setState(() {
-                                Beacon newBeacon = Beacon(color: colorPalette[beacons.length % colorPalette.length]);
-                                beacons.add(newBeacon);
-                                int newIndex = beacons.length - 1;
+                                // --- LOGIC MỚI: DÙNG TRỌNG TÀI K ĐỂ CHỌN GIAO ĐIỂM ---
+                                
+                                // BƯỚC 1: Kiểm tra xem có đủ dữ liệu để tính K không (ít nhất 3 điểm)
+                                if (beacons.length >= 3) {
+                                  // Tính K tham chiếu (Reference K) từ 3 điểm
+                                  LatLng? referenceK = _internalCalculateBestFit();
 
-                                if (newIndex > 0) {
-                                   Beacon prevBeacon = beacons[newIndex - 1];
-                                   if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                                         double? r = double.tryParse(prevBeacon.controller.text);
-                                         if (r != null && r > 0) {
-                                              double distMeters = (r * 1.0) * unitToMeter[selectedUnit]!;
-                                              LatLng center = prevBeacon.location!;
-                                              double bearing = _calculateOptimalBearing(center, newIndex);
-                                              LatLng newPos = _calculatePointFromBearing(center, distMeters, bearing);
-                                              newBeacon.location = newPos;
-                                              selectedIndex = newIndex;
-                                              targetPoints.clear();
-                                              isMockingTarget = false;
-                                              _setMock(newPos.latitude, newPos.longitude);
-                                              _showMsg("Đã tạo P${newIndex + 1} và chạy Mock ngay!");
-                                         }
-                                   }
+                                  if (referenceK != null) {
+                                      // BƯỚC 2: Tìm điểm P nào cách K tham chiếu xa nhất (điểm sai số)
+                                      int worstIndex = -1;
+                                      double maxDist = -1;
+                                      for (int k = 0; k < beacons.length; k++) {
+                                        if (beacons[k].location != null) {
+                                          double d = _haversineDistance(beacons[k].location!, referenceK);
+                                          if (d > maxDist) { maxDist = d; worstIndex = k; }
+                                        }
+                                      }
+
+                                      // BƯỚC 3: Xác định 2 điểm còn lại (2 điểm tốt)
+                                      List<Beacon> bestTwo = [];
+                                      for (int k = 0; k < beacons.length; k++) {
+                                         if (k != worstIndex) bestTwo.add(beacons[k]);
+                                      }
+
+                                      // BƯỚC 4: Tính giao điểm chính xác của 2 điểm tốt này
+                                      LatLng finalPos;
+                                      if (bestTwo.length >= 2 && 
+                                          bestTwo[0].location != null && bestTwo[0].controller.text.isNotEmpty &&
+                                          bestTwo[1].location != null && bestTwo[1].controller.text.isNotEmpty) {
+                                          
+                                          var b1 = bestTwo[0];
+                                          var b2 = bestTwo[1];
+                                          try {
+                                            double r1 = double.parse(b1.controller.text) * unitToMeter[selectedUnit]!;
+                                            double r2 = double.parse(b2.controller.text) * unitToMeter[selectedUnit]!;
+                                            List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+                                            
+                                            if (intersections.isEmpty) {
+                                               // Nếu không cắt nhau, dùng tạm referenceK
+                                               finalPos = referenceK;
+                                            } else if (intersections.length == 1) {
+                                               // Nếu tiếp xúc, lấy điểm đó
+                                               finalPos = intersections[0];
+                                            } else {
+                                               // BƯỚC 5: Nếu cắt 2 điểm, dùng referenceK để chọn điểm gần hơn
+                                               double d1 = _haversineDistance(intersections[0], referenceK);
+                                               double d2 = _haversineDistance(intersections[1], referenceK);
+                                               // Chọn giao điểm gần K tham chiếu nhất
+                                               finalPos = (d1 < d2) ? intersections[0] : intersections[1];
+                                            }
+                                          } catch(e) {
+                                            finalPos = referenceK; // Fallback nếu lỗi parse
+                                          }
+                                      } else {
+                                          finalPos = referenceK; // Fallback nếu không đủ 2 điểm tốt
+                                      }
+
+                                      // BƯỚC 6: Xóa điểm xa nhất, thêm điểm mới
+                                      if (worstIndex != -1) {
+                                        beacons[worstIndex].dispose();
+                                        beacons.removeAt(worstIndex);
+                                      }
+
+                                      // Thêm điểm P mới (chính là giao điểm đã được chọn lọc)
+                                      beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length]));
+                                      
+                                      // Mock & UI
+                                      selectedIndex = beacons.length - 1;
+                                      targetPoints.clear();
+                                      isMockingTarget = false;
+                                      
+                                      _setMock(finalPos.latitude, finalPos.longitude);
+                                      _mapController.move(finalPos, 17);
+                                      _requestFocus(beacons.length - 1); 
+                                      
+                                      _showMsg("Đã chọn giao điểm chuẩn nhất và loại P sai số!");
+                                      return; // Dừng lại
+                                  }
+                                }
+
+                                // --- LOGIC CŨ (DÙNG KHI < 3 ĐIỂM) ---
+                                LatLng? finalPos; 
+                                bool autoPlaced = false;
+
+                                // Tự động tính K1 nếu có 2 điểm
+                                if (beacons.length >= 2) {
+                                  var b1 = beacons[0];
+                                  var b2 = beacons[1];
+                                  if (b1.location != null && b1.controller.text.isNotEmpty &&
+                                      b2.location != null && b2.controller.text.isNotEmpty) {
+                                    try {
+                                      double r1 = double.parse(b1.controller.text) * unitToMeter[selectedUnit]!;
+                                      double r2 = double.parse(b2.controller.text) * unitToMeter[selectedUnit]!;
+                                      List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+                                      if (intersections.isNotEmpty) {
+                                        finalPos = intersections[0];
+                                        autoPlaced = true;
+                                        _showMsg("Đã tạo P${beacons.length + 1} tại giao điểm K1 (tự động)");
+                                      }
+                                    } catch (e) {}
+                                  }
                                 }
                                 
-                                _requestFocus(newIndex); 
+                                // Nếu không tự động được thì tính cạnh bên
+                                if (!autoPlaced) {
+                                  int newIndex = beacons.length; 
+                                  if (newIndex > 0) {
+                                     Beacon prevBeacon = beacons[newIndex - 1];
+                                     if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
+                                           double? r = double.tryParse(prevBeacon.controller.text);
+                                           if (r != null && r > 0) {
+                                                double distMeters = (r * 1.0) * unitToMeter[selectedUnit]!;
+                                                LatLng center = prevBeacon.location!;
+                                                double bearing = _calculateOptimalBearing(center, newIndex);
+                                                finalPos = _calculatePointFromBearing(center, distMeters, bearing);
+                                           }
+                                     }
+                                  }
+                                }
+
+                                // Thêm vào list và mock
+                                if (finalPos != null) {
+                                  beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length]));
+                                  selectedIndex = beacons.length - 1;
+                                  targetPoints.clear();
+                                  isMockingTarget = false;
+                                  
+                                  _setMock(finalPos!.latitude, finalPos!.longitude);
+                                  _mapController.move(finalPos!, 17);
+                                } else {
+                                  beacons.add(Beacon(color: colorPalette[beacons.length % colorPalette.length]));
+                                }
+                                
+                                _requestFocus(beacons.length - 1); 
                               });
                             }
                           );
@@ -1299,4 +1444,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-} // ok nhéb
+}  ///////// ok chuẩn rồi nhé từ 2k lọc ra k chuẩn
