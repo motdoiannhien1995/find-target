@@ -142,7 +142,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
             // --- LONG PRESS: ĐÓNG VÀ RESET TRẠNG THÁI ---
             onLongPress: () async {
-              // 1. Chuyển màu đỏ báo hiệu sắp đóng
               if (mounted) {
                 setState(() {
                   _bgColor = Colors.red;
@@ -150,13 +149,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                 });
               }
               
-              // 2. Đợi 300ms cho người dùng thấy màu đỏ
               await Future.delayed(const Duration(milliseconds: 300));
-              
-              // 3. Đóng Overlay
               await FlutterOverlayWindow.closeOverlay();
 
-              // 4. QUAN TRỌNG: Reset lại màu xanh ngay lập tức để lần sau mở lên nó là màu xanh
               if (mounted) {
                 setState(() {
                   _bgColor = Colors.blueAccent;
@@ -521,6 +516,7 @@ class _MockAppState extends State<MockApp> {
     return totalError;
   }
 
+  // --- HÀM TÍNH TOÁN K (ĐÃ SỬA LỖI) ---
   LatLng? _internalCalculateBestFit() {
      var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
      if (validBeacons.length < 2) return null;
@@ -530,17 +526,28 @@ class _MockAppState extends State<MockApp> {
      double r1 = _getRadiusInMeters(validBeacons[0]);
      double r2 = _getRadiusInMeters(validBeacons[1]);
 
+     // Tính cả 2 giao điểm
      var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
-     LatLng startNode;
+     LatLng bestStartNode;
      
-     if (roots.isNotEmpty) {
-       startNode = roots[0];
-     } else {
+     if (roots.isEmpty) {
+       // Nếu không cắt nhau, lấy trung bình cộng làm điểm bắt đầu
        double sLat = 0, sLng = 0;
        for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
-       startNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
+       bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
+     } else {
+       // NẾU CÓ 2 GIAO ĐIỂM, CHỌN ĐIỂM NÀO SAI SỐ THẤP HƠN VỚI TẤT CẢ CÁC P CÒN LẠI
+       if (roots.length == 2 && validBeacons.length >= 3) {
+          double err1 = _calculateTotalError(roots[0], validBeacons);
+          double err2 = _calculateTotalError(roots[1], validBeacons);
+          bestStartNode = (err1 < err2) ? roots[0] : roots[1];
+       } else {
+          bestStartNode = roots[0];
+       }
      }
-     return _optimizePoint(startNode, validBeacons);
+
+     // Chạy tối ưu hóa từ điểm xuất phát tốt nhất đã chọn
+     return _optimizePoint(bestStartNode, validBeacons);
   }
 
   void _calculateTrilateration() {
@@ -1013,7 +1020,7 @@ class _MockAppState extends State<MockApp> {
             Text("2. Nếu chọn mi hoặc km, hệ thống TỰ ĐỘNG CỘNG 0.5 để bù sai số làm tròn."),
             Text("3. Thanh ở trên dùng để đổi đơn vị cho P đang nhập liệu hoặc đang Mock."),
             Text("4. Nút (+) tạo P mới (Chỉ khi P hiện tại đã hoàn thành)."),
-            Text("5. NHẤN GIỮ NÚT NỔI để đóng ứng dụng."),
+            Text("5. NHẤN GIỮ NÚT NỔI để ĐÓNG ứng dụng."),
           ]),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
