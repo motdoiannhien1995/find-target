@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
@@ -17,6 +18,150 @@ import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart'; 
 import 'package:dio_cache_interceptor_file_store/dio_cache_interceptor_file_store.dart';
+
+// --- THƯ VIỆN MỞ RỘNG ---
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:installed_apps/installed_apps.dart';
+import 'package:installed_apps/app_info.dart';
+
+// ==========================================
+// PHẦN 1: ENTRY POINT CHO OVERLAY
+// ==========================================
+@pragma("vm:entry-point")
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: InvincibleOverlay(),
+  ));
+}
+
+class InvincibleOverlay extends StatefulWidget {
+  const InvincibleOverlay({super.key});
+
+  @override
+  State<InvincibleOverlay> createState() => _InvincibleOverlayState();
+}
+
+class _InvincibleOverlayState extends State<InvincibleOverlay> {
+  // Đảm bảo tên này TRÙNG KHỚP 100% với applicationId trong build.gradle
+  final String _myPackage = "com.khoa.fakegpstracetarget"; 
+  String? _targetPackage;
+  
+  bool _isReturning = false; 
+  Color _bgColor = Colors.blueAccent;
+  IconData _icon = Icons.login; 
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTargetFromDisk();
+  }
+
+  Future<void> _loadTargetFromDisk() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload(); 
+      setState(() {
+        _targetPackage = prefs.getString('target_app_package');
+      });
+    } catch (e) {
+      print("Overlay lỗi đọc disk: $e");
+    }
+  }
+
+  Future<void> _launchApp(String pkg) async {
+    // Cách 1: Dùng InstalledApps (Ưu tiên số 1)
+    try {
+      bool? success = await InstalledApps.startApp(pkg);
+      if (success == true) return; 
+    } catch (e) {
+      print("Cách 1 lỗi: $e");
+    }
+
+    // Cách 2: Dùng Intent URL (Dự phòng)
+    try {
+      final Uri uri = Uri.parse(
+          "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10000000;package=$pkg;end");
+      await launchUrl(uri);
+    } catch (e) {
+      if (mounted) setState(() => _bgColor = Colors.red);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Center(
+        child: Container(
+          width: 80, 
+          height: 80,
+          decoration: BoxDecoration(
+            color: _bgColor.withOpacity(0.9),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: const [BoxShadow(blurRadius: 15, color: Colors.black54)],
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(100),
+            onTap: () {
+              if (_isLoading) return;
+              
+              setState(() {
+                _isLoading = true;
+                _bgColor = Colors.orange;
+              });
+
+              Future.delayed(const Duration(milliseconds: 50), () async {
+                if (_targetPackage == null) await _loadTargetFromDisk();
+                
+                if (_targetPackage != null) {
+                  if (_isReturning) {
+                    await _launchApp(_myPackage);
+                    if (mounted) setState(() {
+                      _isReturning = false;
+                      _icon = Icons.login;
+                      _bgColor = Colors.blueAccent;
+                    });
+                  } else {
+                    await _launchApp(_targetPackage!);
+                    if (mounted) setState(() {
+                      _isReturning = true;
+                      _icon = Icons.undo;
+                      _bgColor = Colors.green;
+                    });
+                  }
+                } else {
+                   if (mounted) setState(() => _bgColor = Colors.grey);
+                }
+
+                if (mounted) setState(() => _isLoading = false);
+              });
+            },
+            onDoubleTap: () async {
+              await _loadTargetFromDisk();
+              setState(() => _bgColor = Colors.purpleAccent);
+              await Future.delayed(const Duration(milliseconds: 300));
+              setState(() => _bgColor = _isReturning ? Colors.green : Colors.blueAccent);
+            },
+            child: _isLoading 
+              ? const Padding(
+                  padding: EdgeInsets.all(22.0),
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                )
+              : Icon(_icon, color: Colors.white, size: 35),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// PHẦN 2: APP CHÍNH (MAIN)
+// ==========================================
 
 late final CacheStore _mapCacheStore;
 
@@ -38,7 +183,7 @@ class Beacon {
   final FocusNode focusNode;
   Color color;
   int resetStep = 0; 
-  
+   
   Beacon({this.location, String dist = "", Color? color}) 
       : controller = TextEditingController(text: dist),
         focusNode = FocusNode(),
@@ -88,9 +233,7 @@ class _MockAppState extends State<MockApp> {
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _mockTimer;
 
-  // Mặc định chỉ có 1 điểm P1
   List<Beacon> beacons = [Beacon(color: Colors.blue)];
-  
   List<SavedTarget> savedTargets = [];
   String selectedUnit = 'm'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
@@ -105,6 +248,7 @@ class _MockAppState extends State<MockApp> {
   bool isMockingTarget = false;
   int mockingTargetIndex = 0;
   bool isSearchVisible = false;
+  String? targetAppPackage; 
 
   static const double earthRadius = 6371000.0;
   static const double strictThreshold = 10.0; 
@@ -115,6 +259,12 @@ class _MockAppState extends State<MockApp> {
     super.initState();
     _initLocation();
     _loadData(); 
+    _requestOverlayPermission();
+  }
+
+  Future<void> _requestOverlayPermission() async {
+    bool status = await FlutterOverlayWindow.isPermissionGranted();
+    if (!status) await FlutterOverlayWindow.requestPermission();
   }
 
   @override
@@ -126,15 +276,81 @@ class _MockAppState extends State<MockApp> {
     super.dispose();
   }
 
-  void _requestFocus(int index) {
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (index >= 0 && index < beacons.length) {
-        beacons[index].focusNode.requestFocus();
-      }
-    });
+  // --- LOGIC CHỌN APP ---
+  Future<void> _pickTargetApp() async {
+    _showMsg("Đang quét danh sách ứng dụng...");
+    try {
+      List<AppInfo> apps = await InstalledApps.getInstalledApps();
+      apps.sort((a, b) => a.name!.toLowerCase().compareTo(b.name!.toLowerCase()));
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Chọn App để liên kết"),
+          content: SizedBox(
+            width: double.maxFinite, height: 400,
+            child: ListView.builder(
+              itemCount: apps.length,
+              itemBuilder: (context, index) {
+                AppInfo app = apps[index];
+                return ListTile(
+                  leading: app.icon != null ? Image.memory(app.icon!, width: 40) : const Icon(Icons.android),
+                  title: Text(app.name ?? "Unknown"),
+                  subtitle: Text(app.packageName ?? "", style: const TextStyle(fontSize: 10)),
+                  onTap: () {
+                    setState(() => targetAppPackage = app.packageName);
+                    _saveTargetApp(app.packageName!);
+                    Navigator.pop(ctx);
+                    _showMsg("Đã liên kết: ${app.name}");
+                    // Khi chọn xong, nếu chưa hiện thì hiện luôn
+                    _showInvincibleOverlay(); 
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+    } catch (e) { _showMsg("Lỗi lấy danh sách app: $e"); }
   }
 
-  // --- LOGIC MOCK ---
+  // --- [SỬA LỖI 2] BẤM LẦN 2 THÌ TẮT ---
+  Future<void> _triggerOverlay() async {
+    if (targetAppPackage == null) {
+      _showMsg("Chưa chọn App! Vui lòng chọn App trước.");
+      _pickTargetApp();
+      return;
+    }
+    
+    // Kiểm tra xem nút có đang hiện không
+    bool isActive = await FlutterOverlayWindow.isActive();
+    
+    if (isActive) {
+      // Đang hiện -> TẮT
+      await FlutterOverlayWindow.closeOverlay();
+      _showMsg("Đã tắt nút nổi");
+    } else {
+      // Đang tắt -> BẬT
+      await _showInvincibleOverlay();
+      _showMsg("Đã bật nút nổi");
+    }
+  }
+
+  Future<void> _showInvincibleOverlay() async {
+    if (await FlutterOverlayWindow.isActive()) return;
+    
+    await FlutterOverlayWindow.showOverlay(
+      enableDrag: true,
+      flag: OverlayFlag.defaultFlag, 
+      visibility: NotificationVisibility.visibilitySecret,
+      alignment: OverlayAlignment.centerLeft, 
+      positionGravity: PositionGravity.none,
+      height: 130, 
+      width: 130, 
+      startPosition: const OverlayPosition(0, -100),
+    );
+  }
+
+  // --- LOGIC MOCK GPS ---
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false, int targetIndex = 0}) async {
     _mockTimer?.cancel();
     void pushMock() {
@@ -142,6 +358,8 @@ class _MockAppState extends State<MockApp> {
     }
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
+    // Bật overlay luôn khi mock (nếu chưa bật)
+    _showInvincibleOverlay(); 
     if (mounted) {
       setState(() {
         isMockingTarget = fromTarget;
@@ -162,9 +380,11 @@ class _MockAppState extends State<MockApp> {
     try { 
       await platform.invokeMethod('stopMockLocation'); 
       if (mounted) { setState(() { isMockingTarget = false; selectedIndex = null; }); }
+      _showMsg("Đã dừng Mock");
     } catch (e) { print(e); }
   }
 
+  // --- CÁC HÀM UI PHỤ TRỢ ---
   void _prevTarget() {
     if (targetPoints.isEmpty) return;
     int newIndex = mockingTargetIndex - 1;
@@ -179,6 +399,14 @@ class _MockAppState extends State<MockApp> {
     if (newIndex >= targetPoints.length) newIndex = 0;
     _setMock(targetPoints[newIndex].latitude, targetPoints[newIndex].longitude, fromTarget: true, targetIndex: newIndex);
     _showMsg("Đang Mock: K${newIndex + 1}");
+  }
+
+  void _requestFocus(int index) {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (index >= 0 && index < beacons.length) {
+        beacons[index].focusNode.requestFocus();
+      }
+    });
   }
 
   void _assignSavedTargetToP(LatLng location) {
@@ -212,8 +440,8 @@ class _MockAppState extends State<MockApp> {
     try {
       LatLng finalPos;
       if (beacons[index].location != null) {
-         finalPos = beacons[index].location!;
-         _showMsg("Đang chạy Mock P${index + 1} (Vị trí cũ)");
+          finalPos = beacons[index].location!;
+          _showMsg("Đang chạy Mock P${index + 1} (Vị trí cũ)");
       } 
       else {
         int bestReferenceIndex = -1;
@@ -274,9 +502,7 @@ class _MockAppState extends State<MockApp> {
     if (bestRefIndex != -1) {
       double distMeters = (minRefDist * 1.0) * unitToMeter[selectedUnit]!;
       LatLng center = beacons[bestRefIndex].location!;
-
       int currentStep = beacons[index].resetStep; 
-      
       double fixedBearing = 0.0;
       switch (currentStep % 4) {
         case 0: fixedBearing = 0.0; break;
@@ -284,18 +510,14 @@ class _MockAppState extends State<MockApp> {
         case 2: fixedBearing = 270.0; break;
         case 3: fixedBearing = 90.0; break;
       }
-      
       String directionName = "";
       if (currentStep % 4 == 0) directionName = "Bắc (0°)";
       else if (currentStep % 4 == 1) directionName = "Nam (180°)";
       else if (currentStep % 4 == 2) directionName = "Tây (270°)";
       else directionName = "Đông (90°)";
-
       beacons[index].resetStep++; 
-
       newPos = _calculatePointFromBearing(center, distMeters, fixedBearing);
       _showMsg("P${index+1}: Đang ở hướng $directionName");
-      
     } else {
       Position p = await Geolocator.getCurrentPosition();
       newPos = LatLng(p.latitude, p.longitude);
@@ -313,6 +535,50 @@ class _MockAppState extends State<MockApp> {
     _requestFocus(index); 
     _mapController.move(newPos, _mapController.camera.zoom);
     _setMock(newPos.latitude, newPos.longitude);
+  }
+
+  void _restartWithResultAsP1() {
+    LatLng? newStart;
+    if (isMockingTarget && targetPoints.isNotEmpty) { newStart = targetPoints[mockingTargetIndex]; } 
+    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { newStart = beacons[selectedIndex!].location; }
+    else if (targetPoints.isNotEmpty) { newStart = targetPoints[0]; }
+
+    if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
+    _stopMock();
+    setState(() {
+      beacons = [Beacon(location: newStart, color: Colors.blue), Beacon(color: Colors.purple)];
+      targetPoints.clear();
+      resultDisplay = "0.000000, 0.000000";
+      accuracyInfo = "Chờ nhập liệu...";
+      accuracyColor = Colors.grey;
+      searchMarker = null;
+      selectedIndex = 0; 
+      isMockingTarget = false;
+    });
+    _requestFocus(0); 
+    _mapController.move(newStart, 16);
+    _setMock(newStart.latitude, newStart.longitude);
+    _showMsg("Đã lấy vị trí đang chạy làm gốc P1!");
+  }
+
+  void _assignResultToNextP() {
+    if (targetPoints.isEmpty) return;
+    LatLng pointToUse = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
+    int nextIndex = -1;
+    for (int i = 0; i < beacons.length; i++) {
+      if (beacons[i].location == null) { nextIndex = i; break; }
+    }
+    setState(() {
+      if (nextIndex != -1) {
+        beacons[nextIndex].location = pointToUse;
+        _showMsg("Đã chuyển kết quả vào P${nextIndex + 1}");
+      } else {
+        beacons.add(Beacon(location: pointToUse, color: colorPalette[beacons.length % colorPalette.length]));
+        nextIndex = beacons.length - 1;
+        _showMsg("Đã tạo P${beacons.length} mới từ kết quả");
+      }
+    });
+    _requestFocus(nextIndex); 
   }
 
   double _calculateOptimalBearing(LatLng center, int currentIndex) {
@@ -530,6 +796,38 @@ class _MockAppState extends State<MockApp> {
     } catch (e) { _showMsg("Lỗi: $e"); }
   }
 
+  // --- LOGIC TÌM KIẾM ---
+  Future<void> _searchLocation() async {
+    String query = _searchCtrl.text.trim();
+    if (query.isEmpty) return;
+    final coordRegExp = RegExp(r'^([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)$');
+    final match = coordRegExp.firstMatch(query);
+    if (match != null) {
+      double lat = double.parse(match.group(1)!);
+      double lng = double.parse(match.group(2)!);
+      LatLng pos = LatLng(lat, lng);
+      _mapController.move(pos, 15);
+      setState(() { searchMarker = pos; isSearchVisible = false; });
+      return;
+    }
+    try {
+      final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
+      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Mock_v1'});
+      if (response.statusCode == 200) {
+        List data = jsonDecode(response.body);
+        if (data.isNotEmpty) {
+          double lat = double.parse(data[0]['lat']);
+          double lon = double.parse(data[0]['lon']);
+          LatLng pos = LatLng(lat, lon);
+          _mapController.move(pos, 15);
+          setState(() { searchMarker = pos; isSearchVisible = false; });
+          FocusScope.of(context).unfocus();
+        } else { _showMsg("Không tìm thấy địa điểm"); }
+      }
+    } catch (e) { _showMsg("Lỗi kết nối"); }
+  }
+
+  // --- LOGIC LƯU TRỮ ---
   void _saveCurrentTarget() {
     LatLng? pointToSave;
     String defaultName = "";
@@ -555,6 +853,56 @@ class _MockAppState extends State<MockApp> {
     );
   }
 
+  Future<void> _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    String encodedData = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
+    await prefs.setString('saved_targets', encodedData);
+  }
+   
+  Future<void> _saveTargetApp(String packageName) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('target_app_package', packageName);
+  }
+
+  Future<void> _saveUnit(String unit) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_unit', unit);
+    setState(() => selectedUnit = unit);
+  }
+
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? encodedData = prefs.getString('saved_targets');
+    if (encodedData != null) {
+      Iterable l = jsonDecode(encodedData);
+      setState(() { savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
+    }
+    String? savedUnit = prefs.getString('selected_unit');
+    if (savedUnit != null) { setState(() => selectedUnit = savedUnit); }
+    String? pkg = prefs.getString('target_app_package');
+    if (pkg != null) setState(() => targetAppPackage = pkg);
+  }
+
+  Future<void> _initLocation() async {
+    var status = await [Permission.location].request();
+    if (status[Permission.location]!.isGranted) {
+      Position p = await Geolocator.getCurrentPosition();
+      LatLng current = LatLng(p.latitude, p.longitude);
+      setState(() => myRealLocation = current);
+      _mapController.move(current, 15);
+      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5))
+          .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
+    }
+  }
+
+  Future<void> _openNavigation(LatLng destination) async {
+    Uri uri = Platform.isAndroid 
+      ? Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}')
+      : Uri.parse('maps://?q=${destination.latitude},${destination.longitude}');
+    if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
+  }
+
+  // --- CÁC HÀM UI PHỤ TRỢ ---
   void _editTargetName(int index) {
     TextEditingController editCtrl = TextEditingController(text: savedTargets[index].name);
     showDialog(
@@ -600,6 +948,7 @@ class _MockAppState extends State<MockApp> {
             Text("2. NHẤN GIỮ BẢN ĐỒ: Tự gán vào P trống và chạy MOCK."),
             Text("3. Nút Refresh: Di chuyển P theo 4 hướng cố định (Nhớ vị trí)."),
             Text("4. Dấu (+): Thêm P mới. Nếu P cũ có dữ liệu -> Tự tính P mới và Mock ngay."),
+            Text("5. Nút Chat: Nhấn giữ để chọn App, nhấn 1 lần để HIỆN NÚT NỔI."),
           ]),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
@@ -652,122 +1001,41 @@ class _MockAppState extends State<MockApp> {
     _showMsg("Đã xóa P${index + 1} cũ");
   }
 
-  void _assignResultToNextP() {
-    if (targetPoints.isEmpty) return;
-    LatLng pointToUse = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
-    int nextIndex = -1;
-    for (int i = 0; i < beacons.length; i++) {
-      if (beacons[i].location == null) { nextIndex = i; break; }
-    }
-    setState(() {
-      if (nextIndex != -1) {
-        beacons[nextIndex].location = pointToUse;
-        _showMsg("Đã chuyển kết quả vào P${nextIndex + 1}");
-      } else {
-        beacons.add(Beacon(location: pointToUse, color: colorPalette[beacons.length % colorPalette.length]));
-        nextIndex = beacons.length - 1;
-        _showMsg("Đã tạo P${beacons.length} mới từ kết quả");
-      }
-    });
-    _requestFocus(nextIndex); 
+  void _showTargetOptions(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(savedTargets[index].name),
+        actions: [
+          IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green), onPressed: () { Navigator.pop(ctx); _assignSavedTargetToP(savedTargets[index].location); }),
+          IconButton(icon: const Icon(Icons.directions, color: Colors.orange), onPressed: () { Navigator.pop(ctx); _openNavigation(savedTargets[index].location); }),
+          IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () { Navigator.pop(ctx); _editTargetName(index); }),
+          IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG")),
+        ],
+      ),
+    );
   }
 
-  void _restartWithResultAsP1() {
-    LatLng? newStart;
-    if (isMockingTarget && targetPoints.isNotEmpty) { newStart = targetPoints[mockingTargetIndex]; } 
-    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { newStart = beacons[selectedIndex!].location; }
-    else if (targetPoints.isNotEmpty) { newStart = targetPoints[0]; }
-
-    if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
-    _stopMock();
-    setState(() {
-      beacons = [Beacon(location: newStart, color: Colors.blue), Beacon(color: Colors.purple)];
-      targetPoints.clear();
-      resultDisplay = "0.000000, 0.000000";
-      accuracyInfo = "Chờ nhập liệu...";
-      accuracyColor = Colors.grey;
-      searchMarker = null;
-      selectedIndex = 0; 
-      isMockingTarget = false;
-    });
-    _requestFocus(0); 
-    _mapController.move(newStart, 16);
-    _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã lấy vị trí đang chạy làm gốc P1!");
+  void _showSavedTargetsSheet() {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: ListView.builder(
+          itemCount: savedTargets.length,
+          itemBuilder: (c, i) => ListTile(
+            leading: const Icon(Icons.location_on, color: Colors.purple),
+            title: Text(savedTargets[i].name),
+            trailing: IconButton(icon: const Icon(Icons.add_location_alt, color: Colors.green), onPressed: () { _assignSavedTargetToP(savedTargets[i].location); Navigator.pop(ctx); }),
+            onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
+          ),
+        ),
+      ),
+    );
   }
 
-  Future<void> _searchLocation() async {
-    String query = _searchCtrl.text.trim();
-    if (query.isEmpty) return;
-    final coordRegExp = RegExp(r'^([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)$');
-    final match = coordRegExp.firstMatch(query);
-    if (match != null) {
-      double lat = double.parse(match.group(1)!);
-      double lng = double.parse(match.group(2)!);
-      LatLng pos = LatLng(lat, lng);
-      _mapController.move(pos, 15);
-      setState(() { searchMarker = pos; isSearchVisible = false; });
-      return;
-    }
-    try {
-      final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
-      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Mock_v1'});
-      if (response.statusCode == 200) {
-        List data = jsonDecode(response.body);
-        if (data.isNotEmpty) {
-          double lat = double.parse(data[0]['lat']);
-          double lon = double.parse(data[0]['lon']);
-          LatLng pos = LatLng(lat, lon);
-          _mapController.move(pos, 15);
-          setState(() { searchMarker = pos; isSearchVisible = false; });
-          FocusScope.of(context).unfocus();
-        } else { _showMsg("Không tìm thấy địa điểm"); }
-      }
-    } catch (e) { _showMsg("Lỗi kết nối"); }
-  }
-
-  Future<void> _saveData() async {
-    final prefs = await SharedPreferences.getInstance();
-    String encodedData = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
-    await prefs.setString('saved_targets', encodedData);
-  }
-  
-  Future<void> _saveUnit(String unit) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('selected_unit', unit);
-    setState(() => selectedUnit = unit);
-  }
-
-  Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
-    String? encodedData = prefs.getString('saved_targets');
-    if (encodedData != null) {
-      Iterable l = jsonDecode(encodedData);
-      setState(() { savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
-    }
-    String? savedUnit = prefs.getString('selected_unit');
-    if (savedUnit != null) { setState(() => selectedUnit = savedUnit); }
-  }
-
-  Future<void> _initLocation() async {
-    var status = await [Permission.location].request();
-    if (status[Permission.location]!.isGranted) {
-      Position p = await Geolocator.getCurrentPosition();
-      LatLng current = LatLng(p.latitude, p.longitude);
-      setState(() => myRealLocation = current);
-      _mapController.move(current, 15);
-      Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5))
-          .listen((p) { if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); });
-    }
-  }
-
-  Future<void> _openNavigation(LatLng destination) async {
-    Uri uri = Platform.isAndroid 
-      ? Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}')
-      : Uri.parse('maps://?q=${destination.latitude},${destination.longitude}');
-    if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
-  }
-
+  // --- BUILD UI (ĐÃ SỬA LỖI TRÀN VIỀN) ---
   @override
   Widget build(BuildContext context) {
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
@@ -784,20 +1052,40 @@ class _MockAppState extends State<MockApp> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       IconButton(onPressed: _showInstructions, icon: const Icon(Icons.help_outline, color: Colors.blue)),
-                      Row(
-                        children: ['ft', 'm', 'km', 'mi'].map((unit) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 2),
-                          child: ChoiceChip(
-                            label: Text(unit, style: const TextStyle(fontSize: 10)), 
-                            selected: selectedUnit == unit, 
-                            onSelected: (val) => _saveUnit(unit),
+                      
+                      // --- [FIX LỖI 1] BỌC VÀO EXPANDED ĐỂ KHÔNG BỊ TRÀN VIỀN ---
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: ['ft', 'm', 'km', 'mi'].map((unit) => Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: ChoiceChip(
+                                label: Text(unit, style: const TextStyle(fontSize: 10)), 
+                                selected: selectedUnit == unit, 
+                                onSelected: (val) => _saveUnit(unit),
+                              ),
+                            )).toList(),
                           ),
-                        )).toList(),
+                        ),
                       ),
-                      IconButton(
-                        icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue),
-                        onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
-                      ),
+                      
+                      Row(
+                        children: [
+                            GestureDetector(
+                             onLongPress: _pickTargetApp, 
+                             child: IconButton(
+                              icon: Icon(Icons.chat_bubble, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey),
+                              onPressed: _triggerOverlay, // Bấm để Bật/Tắt
+                              tooltip: "Bật/Tắt Nút Nổi (Nhấn giữ để chọn App)",
+                             ),
+                            ),
+                            IconButton(
+                             icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue),
+                             onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
+                           ),
+                        ],
+                      )
                     ],
                   ),
                   SizedBox(
@@ -818,19 +1106,19 @@ class _MockAppState extends State<MockApp> {
                                 if (newIndex > 0) {
                                    Beacon prevBeacon = beacons[newIndex - 1];
                                    if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                                       double? r = double.tryParse(prevBeacon.controller.text);
-                                       if (r != null && r > 0) {
-                                           double distMeters = (r * 1.0) * unitToMeter[selectedUnit]!;
-                                           LatLng center = prevBeacon.location!;
-                                           double bearing = _calculateOptimalBearing(center, newIndex);
-                                           LatLng newPos = _calculatePointFromBearing(center, distMeters, bearing);
-                                           newBeacon.location = newPos;
-                                           selectedIndex = newIndex;
-                                           targetPoints.clear();
-                                           isMockingTarget = false;
-                                           _setMock(newPos.latitude, newPos.longitude);
-                                           _showMsg("Đã tạo P${newIndex + 1} và chạy Mock ngay!");
-                                       }
+                                         double? r = double.tryParse(prevBeacon.controller.text);
+                                         if (r != null && r > 0) {
+                                              double distMeters = (r * 1.0) * unitToMeter[selectedUnit]!;
+                                              LatLng center = prevBeacon.location!;
+                                              double bearing = _calculateOptimalBearing(center, newIndex);
+                                              LatLng newPos = _calculatePointFromBearing(center, distMeters, bearing);
+                                              newBeacon.location = newPos;
+                                              selectedIndex = newIndex;
+                                              targetPoints.clear();
+                                              isMockingTarget = false;
+                                              _setMock(newPos.latitude, newPos.longitude);
+                                              _showMsg("Đã tạo P${newIndex + 1} và chạy Mock ngay!");
+                                         }
                                    }
                                 }
                                 
@@ -886,14 +1174,12 @@ class _MockAppState extends State<MockApp> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
-                        // Sửa thành reset chỉ còn 1 điểm P1
                         setState(() { beacons = [Beacon(color: Colors.blue)]; targetPoints.clear(); searchMarker = null; resultDisplay = "0.000000, 0.000000"; accuracyInfo = "Chờ nhập liệu..."; accuracyColor = Colors.grey; });
                         _stopMock();
                       }),
                       if (targetPoints.isNotEmpty || selectedIndex != null) IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
                       if (targetPoints.isNotEmpty) IconButton(icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28), onPressed: _assignResultToNextP),
                       
-                      // --- NÚT RESET VÀ NÚT SAVE ĐÃ ĐỔI CHỖ ---
                       if (selectedIndex != null) IconButton(icon: const Icon(Icons.refresh, color: Colors.orange, size: 28), onPressed: _resetCurrentBeacon),
                       
                       IconButton(
@@ -960,7 +1246,7 @@ class _MockAppState extends State<MockApp> {
                     children: [
                       TileLayer(
                         urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.heesay.trilateration.app',
+                        userAgentPackageName: 'com.khoa.fakegpstracetarget',
                         tileProvider: CachedTileProvider(store: _mapCacheStore),
                       ),
                       CircleLayer(
@@ -1013,37 +1299,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-
-  void _showTargetOptions(int index) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(savedTargets[index].name),
-        actions: [
-          IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green), onPressed: () { Navigator.pop(ctx); _assignSavedTargetToP(savedTargets[index].location); }),
-          IconButton(icon: const Icon(Icons.directions, color: Colors.orange), onPressed: () { Navigator.pop(ctx); _openNavigation(savedTargets[index].location); }),
-          IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { Navigator.pop(ctx); _confirmDeleteTarget(index); }),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG")),
-        ],
-      ),
-    );
-  }
-
-  void _showSavedTargetsSheet() {
-    showModalBottomSheet(
-      context: context, isScrollControlled: true,
-      builder: (ctx) => Container(
-        height: MediaQuery.of(context).size.height * 0.6,
-        child: ListView.builder(
-          itemCount: savedTargets.length,
-          itemBuilder: (c, i) => ListTile(
-            leading: const Icon(Icons.location_on, color: Colors.purple),
-            title: Text(savedTargets[i].name),
-            trailing: IconButton(icon: const Icon(Icons.add_location_alt, color: Colors.green), onPressed: () { _assignSavedTargetToP(savedTargets[i].location); Navigator.pop(ctx); }),
-            onTap: () { _mapController.move(savedTargets[i].location, 15); Navigator.pop(ctx); },
-          ),
-        ),
-      ),
-    );
-  }
-}
+} // ok nhéb
