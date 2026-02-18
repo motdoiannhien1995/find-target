@@ -199,7 +199,8 @@ class Beacon {
   int resetStep = 0; 
   String unit; 
    
-  Beacon({this.location, String dist = "", Color? color, this.unit = 'm'}) 
+  // [EDITED] Default unit changed to 'km' in constructor
+  Beacon({this.location, String dist = "", Color? color, this.unit = 'km'}) 
       : controller = TextEditingController(text: dist),
         focusNode = FocusNode(),
         color = color ?? Colors.blue; 
@@ -248,12 +249,12 @@ class _MockAppState extends State<MockApp> {
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _mockTimer;
 
-  // [EDITED] Mặc định là 'm'
-  List<Beacon> beacons = [Beacon(color: Colors.blue, unit: 'm')];
+  // [EDITED] Mặc định là 'km'
+  List<Beacon> beacons = [Beacon(color: Colors.blue, unit: 'km')];
   List<SavedTarget> savedTargets = [];
   
-  // [EDITED] Đổi thứ tự và mặc định
-  String defaultUnit = 'm'; 
+  // [EDITED] Mặc định là 'km'
+  String defaultUnit = 'km'; 
   final Map<String, double> unitToMeter = {'ft': 0.3048, 'm': 1.0, 'km': 1000.0, 'mi': 1609.34};
   final List<String> availableUnits = ['m', 'km', 'ft', 'mi'];
 
@@ -299,8 +300,6 @@ class _MockAppState extends State<MockApp> {
   double _getRadiusInMeters(Beacon b) {
     double inputVal = double.tryParse(b.controller.text) ?? 0;
     if (inputVal == 0) return 0;
-
-    // [EDITED] Đã xóa logic cộng thêm 0.5 cho km/mi
     // Giữ nguyên giá trị nhập vào nhân với hệ số chuyển đổi
     return inputVal * unitToMeter[b.unit]!;
   }
@@ -574,7 +573,6 @@ class _MockAppState extends State<MockApp> {
               results = [];
            } else {
               displayMsg = "TÌM THẤY K";
-              // [EDITED] Thông báo trung thực hơn
               infoMsg = "Đã tính toán theo đơn vị ${validBeacons[0].unit}";
               infoColor = Colors.green;
               results = roots;
@@ -627,7 +625,8 @@ class _MockAppState extends State<MockApp> {
 
   void _assignSavedTargetToP(LatLng location) {
     int targetIndex = -1;
-    String unitToUse = 'm'; // [EDITED]
+    // [EDITED] Fallback to 'km'
+    String unitToUse = 'km'; 
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
     for (int i = 0; i < beacons.length; i++) {
@@ -827,8 +826,8 @@ class _MockAppState extends State<MockApp> {
 
     if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
     
-    // [EDITED] Mặc định là m
-    String unitP1 = beacons.isNotEmpty ? beacons[0].unit : 'm';
+    // [EDITED] Fallback to 'km'
+    String unitP1 = beacons.isNotEmpty ? beacons[0].unit : 'km';
 
     _stopMock();
     setState(() {
@@ -851,7 +850,8 @@ class _MockAppState extends State<MockApp> {
     if (targetPoints.isEmpty) return;
     LatLng pointToUse = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
     int nextIndex = -1;
-    String unitToUse = 'm'; // [EDITED]
+    // [EDITED] Fallback to 'km'
+    String unitToUse = 'km'; 
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
     for (int i = 0; i < beacons.length; i++) {
@@ -1011,7 +1011,6 @@ class _MockAppState extends State<MockApp> {
         content: const SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text("1. Nhập khoảng cách cho các điểm P."),
-            // [EDITED] Xóa dòng hướng dẫn về cộng 0.5
             Text("2. Thanh ở trên dùng để đổi đơn vị cho P đang nhập liệu hoặc đang Mock."),
             Text("3. Nút (+) tạo P mới. Nếu có >3P, nó sẽ tự động xóa P xa nhất và thay bằng K mới tính được."),
             Text("4. NHẤN GIỮ NÚT NỔI để ĐÓNG ứng dụng."),
@@ -1149,7 +1148,7 @@ class _MockAppState extends State<MockApp> {
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
-                            // [EDITED] Danh sách đơn vị đã được sắp xếp lại ở khai báo
+                            // [EDITED] Danh sách đơn vị
                             children: availableUnits.map((unit) => Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 2),
                               child: ChoiceChip(
@@ -1204,7 +1203,8 @@ class _MockAppState extends State<MockApp> {
                               setState(() {
                                 // --- LOGIC MỚI: TÍNH K -> XÓA XA NHẤT -> THÊM K VÀO ---
                                 // [YÊU CẦU] Logic thay thế P xa nhất bằng K
-                                String defaultNewUnit = 'm'; // [EDITED]
+                                // [EDITED] Fallback to 'km'
+                                String defaultNewUnit = 'km'; 
                                 if (beacons.isNotEmpty) {
                                   defaultNewUnit = beacons.last.unit;
                                 } else {
@@ -1365,16 +1365,17 @@ class _MockAppState extends State<MockApp> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // --- NÚT XÓA TẤT CẢ (ĐÃ SỬA LỖI ĐỎ MÀN HÌNH) ---
+                      // --- NÚT XÓA TẤT CẢ ---
                       IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
                         setState(() { 
-                          beacons = [Beacon(color: Colors.blue, unit: 'm')]; // [EDITED]
+                          // [EDITED] Reset về 'km'
+                          beacons = [Beacon(color: Colors.blue, unit: 'km')]; 
                           targetPoints.clear(); 
                           searchMarker = null; 
                           resultDisplay = "0.000000, 0.000000"; 
                           accuracyInfo = "Chờ nhập liệu..."; 
                           accuracyColor = Colors.grey; 
-                          selectedIndex = 0; // FIX QUAN TRỌNG: Reset index ngay lập tức
+                          selectedIndex = 0; 
                         });
                         _stopMock();
                       }),
@@ -1419,7 +1420,8 @@ class _MockAppState extends State<MockApp> {
                       },
                       onLongPress: (_, latlng) {
                         int targetIndex = -1;
-                        String unitToUse = 'm'; // [EDITED]
+                        // [EDITED] Fallback to 'km'
+                        String unitToUse = 'km'; 
                         if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
 
                         for (int i = 0; i < beacons.length; i++) {
