@@ -103,11 +103,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(100),
-            
-            // --- TAP: CHUYỂN ĐỔI APP ---
             onTap: () {
               if (_isLoading) return;
-              
               setState(() {
                 _isLoading = true;
                 _bgColor = Colors.orange;
@@ -135,12 +132,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                 } else {
                     if (mounted) setState(() => _bgColor = Colors.grey);
                 }
-
                 if (mounted) setState(() => _isLoading = false);
               });
             },
-
-            // --- LONG PRESS: ĐÓNG VÀ RESET TRẠNG THÁI ---
             onLongPress: () async {
               if (mounted) {
                 setState(() {
@@ -148,10 +142,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                   _icon = Icons.close;
                 });
               }
-              
               await Future.delayed(const Duration(milliseconds: 300));
               await FlutterOverlayWindow.closeOverlay();
-
               if (mounted) {
                 setState(() {
                   _bgColor = Colors.blueAccent;
@@ -159,7 +151,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                 });
               }
             },
-
             child: _isLoading 
               ? const Padding(
                   padding: EdgeInsets.all(20.0),
@@ -256,14 +247,17 @@ class _MockAppState extends State<MockApp> {
   final List<String> availableUnits = ['m', 'km', 'ft', 'mi'];
 
   int? selectedIndex; 
+  // Biến targetPoints giờ chỉ dùng để lưu điểm K tính toán được để hiển thị marker, không dùng navigation nữa
   List<LatLng> targetPoints = [];
   LatLng? myRealLocation;
   LatLng? searchMarker; 
-  String resultDisplay = "0.000000, 0.000000";
-  String accuracyInfo = "Chờ nhập liệu...";
-  Color accuracyColor = Colors.grey; 
+  
+  // Hiển thị thông tin
+  String coordDisplay = "0.000000, 0.000000";
+  String addressDisplay = "Chưa có vị trí";
+  Color addressColor = Colors.grey; 
+
   bool isMockingTarget = false;
-  int mockingTargetIndex = 0;
   bool isSearchVisible = false;
   String? targetAppPackage; 
 
@@ -293,11 +287,43 @@ class _MockAppState extends State<MockApp> {
     super.dispose();
   }
 
-  // --- HÀM HELPER: TÍNH BÁN KÍNH CÓ BÙ SAI SỐ ---
+  // --- HÀM HELPER: TÍNH BÁN KÍNH ---
   double _getRadiusInMeters(Beacon b) {
     double inputVal = double.tryParse(b.controller.text) ?? 0;
     if (inputVal == 0) return 0;
     return inputVal * unitToMeter[b.unit]!;
+  }
+
+  // --- LOGIC LẤY ĐỊA CHỈ (REVERSE GEOCODING) ---
+  Future<void> _updateCurrentInfo(LatLng pos) async {
+    setState(() {
+      coordDisplay = "${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}";
+      addressDisplay = "Đang lấy địa chỉ...";
+      addressColor = Colors.blue;
+    });
+
+    try {
+      final url = Uri.parse('https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}&zoom=18&addressdetails=1');
+      final response = await http.get(url, headers: {'User-Agent': 'TrilaterationApp_Mock_v1'});
+      
+      if (response.statusCode == 200) {
+        var data = jsonDecode(response.body);
+        String addr = data['display_name'] ?? "Không tìm thấy tên đường";
+        if (mounted) {
+          setState(() {
+            addressDisplay = addr;
+            addressColor = Colors.black87;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          addressDisplay = "Lỗi mạng hoặc server";
+          addressColor = Colors.red;
+        });
+      }
+    }
   }
 
   // --- LOGIC CHỌN APP ---
@@ -367,7 +393,7 @@ class _MockAppState extends State<MockApp> {
   }
 
   // --- LOGIC MOCK GPS ---
-  Future<void> _setMock(double lat, double lng, {bool fromTarget = false, int targetIndex = 0}) async {
+  Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     _mockTimer?.cancel();
     void pushMock() {
       try { platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); } catch (e) { print("Lỗi Mock: $e"); }
@@ -375,15 +401,15 @@ class _MockAppState extends State<MockApp> {
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     _showInvincibleOverlay(); 
+    
+    // Cập nhật thông tin địa chỉ
+    _updateCurrentInfo(LatLng(lat, lng));
+
     if (mounted) {
       setState(() {
         isMockingTarget = fromTarget;
-        if (fromTarget) {
-          selectedIndex = null;
-          mockingTargetIndex = targetIndex;
-          if (targetPoints.isNotEmpty && targetIndex < targetPoints.length) {
-             _mapController.move(targetPoints[targetIndex], 17);
-          }
+        if (fromTarget && targetPoints.isNotEmpty) {
+           _mapController.move(targetPoints[0], 17);
         }
       });
     }
@@ -537,80 +563,6 @@ class _MockAppState extends State<MockApp> {
       return _optimizePoint(bestStartNode, validBeacons);
   }
 
-  void _calculateTrilateration() {
-    FocusScope.of(context).unfocus();
-    var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
-    
-    if (validBeacons.length < 2) { 
-      _showMsg("Cần ít nhất 2 điểm P để tính toán!");
-      setState(() { accuracyInfo = "Thiếu dữ liệu"; accuracyColor = Colors.red; });
-      return; 
-    }
-
-    try {
-      List<LatLng> results = [];
-      String displayMsg = "";
-      String infoMsg = "";
-      Color infoColor = Colors.black;
-
-      LatLng? optimalK = _internalCalculateBestFit();
-
-      if (optimalK != null) {
-        if (validBeacons.length == 2) {
-           LatLng p1 = validBeacons[0].location!;
-           LatLng p2 = validBeacons[1].location!;
-           double r1 = _getRadiusInMeters(validBeacons[0]);
-           double r2 = _getRadiusInMeters(validBeacons[1]);
-           var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
-           if (roots.isEmpty) {
-              displayMsg = "KHÔNG CẮT NHAU";
-              infoMsg = "Sai khoảng cách";
-              infoColor = Colors.red;
-              results = [];
-           } else {
-              displayMsg = "TÌM THẤY K";
-              infoMsg = "Đã tính toán theo đơn vị ${validBeacons[0].unit}";
-              infoColor = Colors.green;
-              results = roots;
-           }
-        } else {
-           results = [optimalK];
-           displayMsg = "ĐA GIÁC LƯỢNG (3P+)";
-           infoMsg = "Đã tối ưu hóa vị trí";
-           infoColor = Colors.purple;
-        }
-      }
-
-      setState(() {
-          targetPoints = results;
-          resultDisplay = displayMsg;
-          accuracyInfo = infoMsg;
-          accuracyColor = infoColor;
-          if (results.isNotEmpty) {
-             _setMock(results[0].latitude, results[0].longitude, fromTarget: true, targetIndex: 0);
-          }
-      });
-    } catch (e) { 
-      _showMsg("Lỗi tính toán: $e"); 
-    }
-  }
-
-  void _prevTarget() {
-    if (targetPoints.isEmpty) return;
-    int newIndex = mockingTargetIndex - 1;
-    if (newIndex < 0) newIndex = targetPoints.length - 1; 
-    _setMock(targetPoints[newIndex].latitude, targetPoints[newIndex].longitude, fromTarget: true, targetIndex: newIndex);
-    _showMsg("Đang Mock: K${newIndex + 1}");
-  }
-
-  void _nextTarget() {
-    if (targetPoints.isEmpty) return;
-    int newIndex = mockingTargetIndex + 1;
-    if (newIndex >= targetPoints.length) newIndex = 0;
-    _setMock(targetPoints[newIndex].latitude, targetPoints[newIndex].longitude, fromTarget: true, targetIndex: newIndex);
-    _showMsg("Đang Mock: K${newIndex + 1}");
-  }
-
   void _requestFocus(int index) {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (index >= 0 && index < beacons.length) {
@@ -635,8 +587,6 @@ class _MockAppState extends State<MockApp> {
         targetIndex = beacons.length - 1;
       }
       targetPoints.clear();
-      resultDisplay = "Đang chạy điểm lưu";
-      accuracyInfo = "Nguồn: Danh sách đã lưu";
       selectedIndex = targetIndex;
       isMockingTarget = false;
       searchMarker = null;
@@ -644,7 +594,7 @@ class _MockAppState extends State<MockApp> {
     });
     _requestFocus(targetIndex); 
     _setMock(location.latitude, location.longitude);
-    _showMsg("Đã gán và chạy Mock tại P${targetIndex + 1}");
+    _showMsg("Đang chạy P${targetIndex + 1}");
   }
 
   double _calculateOptimalBearing(LatLng center, int currentIndex) {
@@ -676,7 +626,6 @@ class _MockAppState extends State<MockApp> {
       LatLng finalPos;
       if (beacons[index].location != null) {
           finalPos = beacons[index].location!;
-          _showMsg("Đang chạy Mock P${index + 1} (Vị trí cũ)");
       } 
       else {
         int bestReferenceIndex = -1;
@@ -695,13 +644,11 @@ class _MockAppState extends State<MockApp> {
         if (bestReferenceIndex == -1) {
           Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
           finalPos = LatLng(p.latitude, p.longitude);
-          _showMsg("P${index + 1}: Đã lấy vị trí GPS thật");
         } else {
           LatLng baseLoc = beacons[bestReferenceIndex].location!;
           double distMeters = _getRadiusInMeters(beacons[bestReferenceIndex]);
           double optimalBearing = _calculateOptimalBearing(baseLoc, index);
           finalPos = _calculatePointFromBearing(baseLoc, distMeters, optimalBearing);
-          _showMsg("P${index + 1}: Tạo cách P${bestReferenceIndex + 1} (không bù sai số)");
         }
       }
 
@@ -709,8 +656,6 @@ class _MockAppState extends State<MockApp> {
         beacons[index].location = finalPos;
         selectedIndex = index;
         targetPoints.clear(); 
-        resultDisplay = "Dữ liệu P thay đổi";
-        accuracyInfo = "Cần tính toán lại";
         isMockingTarget = false;
         if (myRealLocation == null && index == 0) { myRealLocation = finalPos; }
       });
@@ -741,13 +686,10 @@ class _MockAppState extends State<MockApp> {
              double dist2 = _haversineDistance(currentP3, k2);
 
              LatLng newPos;
-             String msg;
              if (dist1 < dist2) {
                 newPos = k2; 
-                msg = "Đã chuyển P3 sang K2";
              } else {
                 newPos = k1; 
-                msg = "Đã chuyển P3 sang K1";
              }
 
              setState(() {
@@ -757,7 +699,6 @@ class _MockAppState extends State<MockApp> {
              });
              _setMock(newPos.latitude, newPos.longitude);
              _mapController.move(newPos, 17);
-             _showMsg(msg);
              return; 
            }
        }
@@ -786,27 +727,17 @@ class _MockAppState extends State<MockApp> {
         case 2: fixedBearing = 270.0; break;
         case 3: fixedBearing = 90.0; break;
       }
-      String directionName = "";
-      if (currentStep % 4 == 0) directionName = "Bắc (0°)";
-      else if (currentStep % 4 == 1) directionName = "Nam (180°)";
-      else if (currentStep % 4 == 2) directionName = "Tây (270°)";
-      else directionName = "Đông (90°)";
       beacons[index].resetStep++; 
       newPos = _calculatePointFromBearing(center, distMeters, fixedBearing);
-      _showMsg("P${index+1}: Đang ở hướng $directionName");
     } else {
       Position p = await Geolocator.getCurrentPosition();
       newPos = LatLng(p.latitude, p.longitude);
-      _showMsg("Không có P làm tâm, lấy lại GPS thật");
     }
 
     setState(() {
       beacons[index].location = newPos;
       beacons[index].controller.clear();
       targetPoints.clear();
-      resultDisplay = "P${index+1} đã làm mới";
-      accuracyInfo = "Dữ liệu đã reset";
-      accuracyColor = Colors.orange;
     });
     _requestFocus(index); 
     _mapController.move(newPos, _mapController.camera.zoom);
@@ -815,7 +746,7 @@ class _MockAppState extends State<MockApp> {
 
   void _restartWithResultAsP1() {
     LatLng? newStart;
-    if (isMockingTarget && targetPoints.isNotEmpty) { newStart = targetPoints[mockingTargetIndex]; } 
+    if (isMockingTarget && targetPoints.isNotEmpty) { newStart = targetPoints[0]; } 
     else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { newStart = beacons[selectedIndex!].location; }
     else if (targetPoints.isNotEmpty) { newStart = targetPoints[0]; }
 
@@ -827,9 +758,8 @@ class _MockAppState extends State<MockApp> {
     setState(() {
       beacons = [Beacon(location: newStart, color: Colors.blue, unit: unitP1)];
       targetPoints.clear();
-      resultDisplay = "0.000000, 0.000000";
-      accuracyInfo = "Chờ nhập liệu...";
-      accuracyColor = Colors.grey;
+      coordDisplay = "0.000000, 0.000000";
+      addressDisplay = "Chưa có vị trí";
       searchMarker = null;
       selectedIndex = 0; 
       isMockingTarget = false;
@@ -837,12 +767,12 @@ class _MockAppState extends State<MockApp> {
     _requestFocus(0); 
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã lấy vị trí đang chạy làm gốc P1!");
+    _showMsg("Đã gán gốc P1 mới!");
   }
 
   void _assignResultToNextP() {
     if (targetPoints.isEmpty) return;
-    LatLng pointToUse = targetPoints[isMockingTarget ? mockingTargetIndex : 0];
+    LatLng pointToUse = targetPoints[0];
     int nextIndex = -1;
     String unitToUse = 'km'; 
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
@@ -853,11 +783,9 @@ class _MockAppState extends State<MockApp> {
     setState(() {
       if (nextIndex != -1) {
         beacons[nextIndex].location = pointToUse;
-        _showMsg("Đã chuyển kết quả vào P${nextIndex + 1}");
       } else {
         beacons.add(Beacon(location: pointToUse, color: colorPalette[beacons.length % colorPalette.length], unit: unitToUse));
         nextIndex = beacons.length - 1;
-        _showMsg("Đã tạo P${beacons.length} mới từ kết quả");
       }
     });
     _requestFocus(nextIndex); 
@@ -898,7 +826,7 @@ class _MockAppState extends State<MockApp> {
   void _saveCurrentTarget() {
     LatLng? pointToSave;
     String defaultName = "";
-    if (isMockingTarget && targetPoints.isNotEmpty) { pointToSave = targetPoints[mockingTargetIndex]; defaultName = "Mục tiêu ${savedTargets.length + 1}"; } 
+    if (isMockingTarget && targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu ${savedTargets.length + 1}"; } 
     else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { pointToSave = beacons[selectedIndex!].location; defaultName = "Điểm P${selectedIndex! + 1}"; }
     else if (targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu ${savedTargets.length + 1}"; }
 
@@ -1141,7 +1069,6 @@ class _MockAppState extends State<MockApp> {
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
-                            // [EDITED] Danh sách đơn vị
                             children: availableUnits.map((unit) => Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 2),
                               child: ChoiceChip(
@@ -1197,8 +1124,6 @@ class _MockAppState extends State<MockApp> {
 
                                 if (beacons.length == 3) {
                                   // --- LOGIC MỚI HYBRID: TRỌNG TÀI + BEST FIT ---
-                                  
-                                  // 1. Luôn tính BestFit từ cả 3 điểm trước (Tiêu chí 1)
                                   LatLng? bestK = _internalCalculateBestFit();
 
                                   int countM = beacons.where((b) => b.unit == 'm').length;
@@ -1208,7 +1133,6 @@ class _MockAppState extends State<MockApp> {
 
                                   // Điều kiện kích hoạt Trọng Tài (M-KM hoặc MI-FT)
                                   bool isRefereeMode = (countM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
-                                  
                                   LatLng? finalPoint;
 
                                   if (isRefereeMode) {
@@ -1217,7 +1141,6 @@ class _MockAppState extends State<MockApp> {
                                       var referee = beacons.firstWhere((b) => b.unit != pairUnit);
                                       
                                       if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
-                                           // Tính 2 giao điểm (K1, K2) của cặp đôi
                                            var roots = _calculateTwoCircleIntersectionPrecise(
                                               pair[0].location!, _getRadiusInMeters(pair[0]), 
                                               pair[1].location!, _getRadiusInMeters(pair[1])
@@ -1226,35 +1149,26 @@ class _MockAppState extends State<MockApp> {
                                            if (roots.length == 2) {
                                                double rRef = _getRadiusInMeters(referee);
                                                
-                                               // --- TÍNH ĐIỂM SỐ CHO K1 (Thấp hơn là tốt hơn) ---
-                                               // Lỗi 1: Sai lệch bán kính trọng tài
                                                double distRefToK1 = _haversineDistance(referee.location!, roots[0]);
                                                double errorRadius1 = (distRefToK1 - rRef).abs();
-                                               // Lỗi 2: Khoảng cách tới BestFit (nếu có)
                                                double errorFit1 = bestK != null ? _haversineDistance(bestK, roots[0]) : 0;
                                                double totalScore1 = errorRadius1 + errorFit1;
 
-                                               // --- TÍNH ĐIỂM SỐ CHO K2 ---
                                                double distRefToK2 = _haversineDistance(referee.location!, roots[1]);
                                                double errorRadius2 = (distRefToK2 - rRef).abs();
                                                double errorFit2 = bestK != null ? _haversineDistance(bestK, roots[1]) : 0;
                                                double totalScore2 = errorRadius2 + errorFit2;
 
-                                               // QUYẾT ĐỊNH: Chọn K có tổng lỗi thấp nhất
                                                finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
-                                               
-                                               _showMsg("Trọng tài Hybrid: Chọn K${(totalScore1 < totalScore2) ? '1' : '2'} (Điểm: ${totalScore1.toStringAsFixed(1)} vs ${totalScore2.toStringAsFixed(1)})");
                                            }
                                       }
                                   }
 
-                                  // Nếu không kích hoạt chế độ trọng tài, hoặc tính toán lỗi, fallback về BestK thuần túy
                                   if (finalPoint == null && bestK != null) {
                                      finalPoint = bestK;
                                   }
 
                                   if (finalPoint != null) {
-                                      // --- Tìm P cũ xa nhất so với kết quả FINAL để xóa ---
                                       int worstIndex = -1;
                                       double maxDist = -1;
                                       for (int k = 0; k < beacons.length; k++) {
@@ -1378,12 +1292,16 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // --- HIỂN THỊ TỌA ĐỘ VÀ ĐỊA CHỈ THAY VÌ CẢNH BÁO ---
                   GestureDetector(
-                    onLongPress: () { Clipboard.setData(ClipboardData(text: resultDisplay)); _showMsg("Đã copy!"); },
+                    onLongPress: () { Clipboard.setData(ClipboardData(text: "$coordDisplay\n$addressDisplay")); _showMsg("Đã copy!"); },
                     child: Column(
                       children: [
-                        Text(resultDisplay, style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15, color: accuracyColor)),
-                        Text(accuracyInfo, style: TextStyle(fontSize: 11, color: accuracyColor, fontStyle: FontStyle.italic, fontWeight: FontWeight.bold)),
+                        Text(coordDisplay, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Text(addressDisplay, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: addressColor, fontStyle: FontStyle.italic, fontWeight: FontWeight.bold)),
+                        ),
                       ],
                     ),
                   ),
@@ -1396,9 +1314,9 @@ class _MockAppState extends State<MockApp> {
                           beacons = [Beacon(color: Colors.blue, unit: 'km')]; 
                           targetPoints.clear(); 
                           searchMarker = null; 
-                          resultDisplay = "0.000000, 0.000000"; 
-                          accuracyInfo = "Chờ nhập liệu..."; 
-                          accuracyColor = Colors.grey; 
+                          coordDisplay = "0.000000, 0.000000"; 
+                          addressDisplay = "Chưa có vị trí"; 
+                          addressColor = Colors.grey; 
                           selectedIndex = 0; 
                         });
                         _stopMock();
@@ -1410,18 +1328,16 @@ class _MockAppState extends State<MockApp> {
                       
                       IconButton(
                         onPressed: (targetPoints.isEmpty && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { 
-                          if (targetPoints.isNotEmpty) _setMock(targetPoints[mockingTargetIndex].latitude, targetPoints[mockingTargetIndex].longitude, fromTarget: true, targetIndex: mockingTargetIndex); 
+                           if (selectedIndex != null && beacons[selectedIndex!].location != null) {
+                             _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
+                           } else if (targetPoints.isNotEmpty) {
+                             _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
+                           }
                         }),
                         icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
                       ),
                       
                       if (targetPoints.isNotEmpty || selectedIndex != null) IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
-
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                        onPressed: _calculateTrilateration, 
-                        child: const Text("TÍNH", style: TextStyle(fontWeight: FontWeight.bold))
-                      ),
                     ],
                   ),
                 ],
@@ -1469,7 +1385,7 @@ class _MockAppState extends State<MockApp> {
 
                         _requestFocus(targetIndex);
                         _setMock(latlng.latitude, latlng.longitude);
-                        _showMsg("Đã gán và MOCK P${targetIndex + 1} từ điểm nhấn giữ");
+                        _showMsg("Đã gán và MOCK P${targetIndex + 1}");
                       },
                     ),
                     children: [
@@ -1500,7 +1416,7 @@ class _MockAppState extends State<MockApp> {
                             if (beacons[i].location != null)
                               Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : beacons[i].color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
                           for (int i = 0; i < targetPoints.length; i++)
-                            Marker(point: targetPoints[i], width: 60, height: 60, child: Icon(Icons.location_searching, color: (isMockingTarget && mockingTargetIndex == i) ? Colors.red : Colors.green, size: 35)),
+                            Marker(point: targetPoints[i], width: 60, height: 60, child: const Icon(Icons.location_searching, color: Colors.green, size: 35)),
                           for (int i = 0; i < savedTargets.length; i++)
                             Marker(point: savedTargets[i].location, width: 70, height: 60, child: GestureDetector(onTap: () => _showTargetOptions(i), child: const Icon(Icons.bookmark, color: Colors.purple, size: 20))),
                         ],
@@ -1514,12 +1430,6 @@ class _MockAppState extends State<MockApp> {
                     const SizedBox(height: 10),
                     FloatingActionButton(heroTag: "locBtn", mini: true, backgroundColor: Colors.white, onPressed: () async { Position p = await Geolocator.getCurrentPosition(); _mapController.move(LatLng(p.latitude, p.longitude), 15); }, child: const Icon(Icons.my_location, color: Colors.blue)),
                   ])),
-                  if (targetPoints.length > 1 && isMockingTarget)
-                    Positioned(bottom: 20, left: 0, right: 0, child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(30)), child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20), onPressed: _prevTarget),
-                      Text("K${mockingTargetIndex + 1} / ${targetPoints.length}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      IconButton(icon: const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 20), onPressed: _nextTarget),
-                    ])))),
                 ],
               ),
             ),
@@ -1528,4 +1438,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-}
+} ///  ok lược bỏ  (đã có sô nhà mà )
