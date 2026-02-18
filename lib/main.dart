@@ -1088,7 +1088,7 @@ class _MockAppState extends State<MockApp> {
                             GestureDetector(
                              onLongPress: _pickTargetApp, 
                              child: IconButton(
-                              icon: Icon(Icons.chat_bubble, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey),
+                              icon: Icon(Icons.layers, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey), 
                               onPressed: _triggerOverlay, 
                               tooltip: "Bật/Tắt Nút Nổi (Nhấn giữ để chọn App)",
                              ),
@@ -1351,6 +1351,16 @@ class _MockAppState extends State<MockApp> {
                     options: MapOptions(
                       initialCenter: const LatLng(10.7626, 106.6601),
                       initialZoom: 13,
+                      // --- CÁC THAY ĐỔI ĐÃ THÊM: GIỚI HẠN ZOOM & KÉO ---
+                      minZoom: 3.0, 
+                      maxZoom: 18.0,
+                      cameraConstraint: CameraConstraint.contain(
+                        bounds: LatLngBounds(
+                          const LatLng(-90, -180),
+                          const LatLng(90, 180),
+                        ),
+                      ),
+                      // --------------------------------------------------
                       onTap: (_, latlng) {
                         if (selectedIndex != null && !isMockingTarget) {
                           setState(() { beacons[selectedIndex!].location = latlng; targetPoints.clear(); });
@@ -1390,7 +1400,8 @@ class _MockAppState extends State<MockApp> {
                     ),
                     children: [
                       TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        // --- ĐỔI SERVER ĐỂ TRÁNH LỖI ACCESS BLOCKED (403) ---
+                        urlTemplate: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
                         userAgentPackageName: 'com.khoa.fakegpstracetarget',
                         tileProvider: CachedTileProvider(store: _mapCacheStore),
                       ),
@@ -1438,4 +1449,4 @@ class _MockAppState extends State<MockApp> {
       ),
     );
   }
-} ///  ok lược bỏ  (đã có sô nhà mà )
+}
