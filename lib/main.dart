@@ -13,29 +13,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 
-// --- THƯ VIỆN CACHE ---
 import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart'; 
 import 'package:dio_cache_interceptor_file_store/dio_cache_interceptor_file_store.dart';
 
-// --- THƯ VIỆN MỞ RỘNG ---
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:installed_apps/app_info.dart';
 
-// --- FIREBASE VÀ THU PHÍ ---
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:android_id/android_id.dart';
 
-// --- THƯ VIỆN TẢI ẢNH QR ---
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
 
-// ==========================================
-// PHẦN 1: ENTRY POINT CHO OVERLAY (CỬA SỔ NỔI)
-// ==========================================
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -165,15 +158,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 }
 
-// ==========================================
-// PHẦN 2: APP CHÍNH (MAIN)
-// ==========================================
-
 late final CacheStore _mapCacheStore;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
   await Firebase.initializeApp();
 
   try {
@@ -185,7 +173,6 @@ Future<void> main() async {
   runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MockApp()));
 }
 
-// --- MODELS ---
 class Beacon {
   LatLng? location;
   final TextEditingController controller;
@@ -230,7 +217,6 @@ class SavedTarget {
   );
 }
 
-// --- MAIN WIDGET ---
 class MockApp extends StatefulWidget {
   const MockApp({super.key});
   @override
@@ -243,10 +229,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final TextEditingController _searchCtrl = TextEditingController();
   final ScreenshotController _screenshotController = ScreenshotController(); 
 
-  // --- BIẾN QUẢN LÝ THU PHÍ & CÔNG TẮC ---
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 500;
+  final int maxTrial = 50;
   bool allowTrialFromServer = true; 
   String? deviceId;
 
@@ -629,7 +614,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       setState(() {}); 
     }
 
-    // ĐÃ GỠ BỎ TIMER GÂY XUNG ĐỘT - CHỈ GỌI KOTLIN 1 LẦN
+    // ĐÃ DỌN SẠCH TIMER GÂY XUNG ĐỘT - Chỉ bắn lệnh 1 lần duy nhất cho Kotlin lo
     try { 
       platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
     } catch (e) { 
@@ -659,8 +644,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _showMsg("Đã dừng Mock");
     } catch (e) { print(e); }
   }
-
-  // --- LOGIC TÍNH TOÁN ---
 
   double _toRadians(double degree) => degree * pi / 180.0;
   double _toDegrees(double radian) => radian * 180.0 / pi;
@@ -1035,7 +1018,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _requestFocus(nextIndex); 
   }
 
-  // --- LOGIC TÌM KIẾM ---
   Future<void> _searchLocation() async {
     String query = _searchCtrl.text.trim();
     if (query.isEmpty) return;
@@ -1066,7 +1048,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } catch (e) { _showMsg("Lỗi kết nối"); }
   }
 
-  // --- LOGIC LƯU TRỮ ---
   void _saveCurrentTarget() {
     LatLng? pointToSave;
     String defaultName = "";
@@ -1133,7 +1114,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
-  // --- CÁC HÀM UI PHỤ TRỢ ---
   void _editTargetName(int index) {
     TextEditingController editCtrl = TextEditingController(text: savedTargets[index].name);
     showDialog(
@@ -1422,7 +1402,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  // --- BUILD UI ---
   @override
   Widget build(BuildContext context) {
     String activeUnitForChip = defaultUnit;
@@ -1750,4 +1729,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+}  // mock cập nhật nhanh vị trí
