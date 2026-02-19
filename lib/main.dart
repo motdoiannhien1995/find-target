@@ -298,7 +298,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   // ======================================================
   // HỆ THỐNG THU PHÍ: KIỂM TRA MÁY & CÔNG TẮC TỪ XA
-  // ĐÃ SỬA LỖI CHỐNG VẤP ĐỂ NGĂN XÓA DỮ LIỆU APP LÁCH LUẬT
   // ======================================================
 
   Future<void> _checkStatus() async {
@@ -640,7 +639,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (!isPro) {
       trialCount++;
       if (deviceId != null) {
-         // !!! FIX LỖI ÉP ĐỒNG BỘ: Sử dụng "await set(..., merge: true)" để lưu Firebase lập tức
+         // !!! FIX LỖI ÉP ĐỒNG BỘ LÊN FIREBASE MỖI KHI DÙNG
          await FirebaseFirestore.instance.collection('devices').doc(deviceId!).set({
            'trialCount': trialCount,
            'lastUsed': FieldValue.serverTimestamp(),
@@ -1572,14 +1571,20 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            GestureDetector(
+                            // ===============================================
+                            // ĐÃ FIX: SỬA THÀNH INKWELL ĐỂ KHÔNG BỊ LỖI CHẶN NHẤN GIỮ
+                            // ===============================================
+                            InkWell(
                               onLongPress: _pickTargetApp, 
-                              child: IconButton(
-                                icon: Icon(Icons.layers, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey, size: 26), 
-                                onPressed: _triggerOverlay, 
-                                tooltip: "Bật/Tắt Nút Nổi",
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
+                              onTap: _triggerOverlay,
+                              borderRadius: BorderRadius.circular(20),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                                child: Icon(
+                                  Icons.layers, 
+                                  color: targetAppPackage != null ? Colors.blueAccent : Colors.grey, 
+                                  size: 26
+                                ),
                               ),
                             ),
                             const SizedBox(width: 16),
@@ -1598,7 +1603,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT HOẶC CÔNG TẮC BỊ TẮT
+                      // NÚT THÊM (+)
                       IconButton(
                         icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                         onPressed: _addNewBeacon 
@@ -1777,4 +1782,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} // ok nhé
+}
