@@ -263,6 +263,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   
   final List<Color> colorPalette = [Colors.orange, Colors.teal, Colors.pink, Colors.brown, Colors.indigo, Colors.lime];
 
+  // Biến lưu trữ lại ô nào đang được focus trước khi ẩn app
+  int? _lastFocusedIndex;
+
   @override
   void initState() {
     super.initState();
@@ -287,21 +290,31 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  // --- LOGIC PHỤC HỒI BÀN PHÍM CỰC MẠNH ---
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _restoreKeyboardFocus();
-    }
-  }
-
-  void _restoreKeyboardFocus() {
-    if (selectedIndex != null && selectedIndex! < beacons.length) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          beacons[selectedIndex!].focusNode.requestFocus();
-          SystemChannels.textInput.invokeMethod('TextInput.show');
-        }
-      });
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // Khi app sắp bị ẩn đi (bấm qua app khác)
+      // Tìm xem ô nào đang được gõ phím
+      int currentFocus = beacons.indexWhere((b) => b.focusNode.hasFocus);
+      if (currentFocus != -1) {
+        _lastFocusedIndex = currentFocus;
+        // Phải gỡ focus ngay lập tức để lát nữa gọi lại nó mới nhận diện là thao tác mới
+        FocusManager.instance.primaryFocus?.unfocus();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // Khi quay lại app
+      if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            // Yêu cầu focus lại vào ô đã lưu
+            beacons[_lastFocusedIndex!].focusNode.requestFocus();
+            // Chủ động gọi thẳng System Channel để ép bàn phím bung lên
+            SystemChannels.textInput.invokeMethod('TextInput.show');
+            _lastFocusedIndex = null; // Xóa cờ lưu
+          }
+        });
+      }
     }
   }
 
@@ -395,7 +408,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _showMsg("Đang quét danh sách ứng dụng...");
     try {
       List<AppInfo> apps = await InstalledApps.getInstalledApps();
-      apps.sort((a, b) => a.name!.toLowerCase().compareTo(b.name!.toLowerCase()));
+      apps.sort((a, b) => (a.name ?? "").toLowerCase().compareTo((b.name ?? "").toLowerCase()));
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -407,9 +420,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               itemBuilder: (context, index) {
                 AppInfo app = apps[index];
                 return ListTile(
-                  leading: app.icon != null ? Image.memory(app.icon!, width: 40) : const Icon(Icons.android),
-                  title: Text(app.name ?? "Unknown"),
-                  subtitle: Text(app.packageName ?? "", style: const TextStyle(fontSize: 10)),
+                  leading: SizedBox(
+                    width: 40, 
+                    height: 40,
+                    child: app.icon != null && app.icon!.isNotEmpty
+                        ? Image.memory(
+                            app.icon!,
+                            fit: BoxFit.contain,
+                            errorBuilder: (c, e, s) => const Icon(Icons.android, size: 30, color: Colors.grey),
+                          )
+                        : const Icon(Icons.android, size: 30, color: Colors.grey),
+                  ),
+                  title: Text(app.name ?? "Unknown", maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(app.packageName ?? "", maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
                   onTap: () {
                     setState(() => targetAppPackage = app.packageName);
                     _saveTargetApp(app.packageName!);
@@ -463,7 +486,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
-    _showInvincibleOverlay(); 
+    
+    if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
+      _showInvincibleOverlay(); 
+    }
     
     _updateCurrentInfo(LatLng(lat, lng));
 
@@ -629,6 +655,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (index >= 0 && index < beacons.length) {
         beacons[index].focusNode.requestFocus();
+        SystemChannels.textInput.invokeMethod('TextInput.show'); // Ép gọi bàn phím
       }
     });
   }
@@ -747,7 +774,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
              double dist1 = _haversineDistance(currentP3, k1);
              double dist2 = _haversineDistance(currentP3, k2);
 
-             // Lấy điểm K gần với vị trí P3 hiện tại nhất (tính lại K cập nhật theo dữ liệu P1, P2)
              LatLng newPos = (dist1 < dist2) ? k1 : k2;
 
              setState(() {
