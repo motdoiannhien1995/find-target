@@ -78,6 +78,43 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:539414765425:android:5ba807fef07bafbf2560d0",
+        "android_client_info": {
+          "package_name": "com.khoa.trilaterat"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "539414765425-fc12ifl1ibdkr3d5ao5mbgam9qdu3mms.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.khoa.trilaterat",
+            "certificate_hash": "ce51d2c2f6e749db27fca24cdf89c979f28ae80a"
+          }
+        },
+        {
+          "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJnpye19zI2KO4KQYxpJYkoHT11zM2298"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

@@ -53,7 +53,7 @@ class InvincibleOverlay extends StatefulWidget {
 }
 
 class _InvincibleOverlayState extends State<InvincibleOverlay> {
-  final String _myPackage = "com.khoa.fakegpstracetarget"; 
+  final String _myPackage = "com.khoa.trilaterat"; 
   String? _targetPackage;
   
   bool _isReturning = false; 
@@ -69,7 +69,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Future<void> _loadTargetFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.reload(); // Cập nhật lại bộ nhớ mới nhất
+      await prefs.reload(); 
       setState(() {
         _targetPackage = prefs.getString('target_app_package');
       });
@@ -112,15 +112,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           child: InkWell(
             borderRadius: BorderRadius.circular(100),
             
-            // --- 1. NHẤN 1 LẦN: Đổi qua lại giữa 2 App SIÊU TỐC ---
             onTap: () async {
-              // Cập nhật giao diện lập tức để phản hồi nhanh
               setState(() {
                 _bgColor = Colors.orange;
               });
 
-              // LUÔN LUÔN đọc lại dữ liệu từ Disk mỗi khi bấm
-              // Để đảm bảo nhận được tên App mới nếu khách hàng vừa đổi
               await _loadTargetFromDisk();
               
               if (_targetPackage != null) {
@@ -144,9 +140,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               }
             },
 
-            // ĐÃ XÓA onDoubleTap ĐỂ NÚT BẤM NHẬN LỆNH NHANH NHẤT VÀ KHÔNG BỊ LỖI KHI BẤM LIÊN TỤC
-
-            // --- 2. NHẤN GIỮ: TẮT CỬA SỔ NỔI ---
             onLongPress: () async {
               if (mounted) {
                 setState(() {
@@ -164,7 +157,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               }
             },
 
-            // Loại bỏ hoàn toàn hiệu ứng loading, icon luôn hiện diện
             child: Icon(_icon, color: Colors.white, size: 32),
           ),
         ),
@@ -182,7 +174,6 @@ late final CacheStore _mapCacheStore;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // KHỞI TẠO FIREBASE CHO HỆ THỐNG THU PHÍ
   await Firebase.initializeApp();
 
   try {
@@ -251,12 +242,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final MapController _mapController = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
   final ScreenshotController _screenshotController = ScreenshotController(); 
-  Timer? _mockTimer;
 
   // --- BIẾN QUẢN LÝ THU PHÍ & CÔNG TẮC ---
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 50;
+  final int maxTrial = 500;
   bool allowTrialFromServer = true; 
   String? deviceId;
 
@@ -295,10 +285,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _loadData(); 
     _requestOverlayPermission();
   }
-
-  // ======================================================
-  // HỆ THỐNG THU PHÍ: KIỂM TRA MÁY & CÔNG TẮC TỪ XA
-  // ======================================================
 
   Future<void> _checkStatus() async {
     final androidIdPlugin = const AndroidId();
@@ -421,15 +407,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  // --- HÀM KIỂM TRA CHẶN ---
   bool _isActionBlocked() {
     if (isPro) return false; 
     if (!allowTrialFromServer) return true; 
     if (trialCount >= maxTrial) return true; 
     return false;
   }
-
-  // ======================================================
 
   Future<void> _requestOverlayPermission() async {
     bool status = await FlutterOverlayWindow.isPermissionGranted();
@@ -439,7 +422,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _mockTimer?.cancel();
     _mapController.dispose();
     _searchCtrl.dispose();
     for (var b in beacons) b.dispose();
@@ -647,12 +629,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       setState(() {}); 
     }
 
-    _mockTimer?.cancel();
-    void pushMock() {
-      try { platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); } catch (e) { print("Lỗi Mock"); }
+    // ĐÃ GỠ BỎ TIMER GÂY XUNG ĐỘT - CHỈ GỌI KOTLIN 1 LẦN
+    try { 
+      platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
+    } catch (e) { 
+      print("Lỗi Mock: $e"); 
     }
-    pushMock();
-    _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
       _showInvincibleOverlay(); 
@@ -671,8 +653,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _stopMock() async {
-    _mockTimer?.cancel();
-    _mockTimer = null;
     try { 
       await platform.invokeMethod('stopMockLocation'); 
       if (mounted) { setState(() { isMockingTarget = false; selectedIndex = null; }); }
@@ -1268,7 +1248,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  // --- LOGIC ĐỔI ĐƠN VỊ THÔNG MINH ---
   void _setUnitForSelectedBeacon(String unit) {
     setState(() {
       int focusedIndex = beacons.indexWhere((b) => b.focusNode.hasFocus);
@@ -1285,9 +1264,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  // CẬP NHẬT: CHẶN THÊM ĐIỂM NGAY TẠI NÚT (+)
   void _addNewBeacon() {
-    // SỬ DỤNG HÀM KIỂM TRA CHẶN
     if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
@@ -1436,7 +1413,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         selectedIndex = beacons.length - 1;
         targetPoints.clear();
         isMockingTarget = false;
-        _setMock(finalPos!.latitude, finalPos!.longitude);
+        _setMock(finalPos.latitude, finalPos.longitude);
         _zoomToFitAll();
       } else {
         beacons.add(Beacon(color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
@@ -1471,7 +1448,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     height: 70,
                     child: Row(
                       children: [
-                        // Danh sách các điểm P
                         Expanded(
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
@@ -1568,9 +1544,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // ===============================================
-                            // ĐÃ FIX: SỬA THÀNH INKWELL VÀ CHẠY MƯỢT
-                            // ===============================================
                             InkWell(
                               onLongPress: _pickTargetApp, 
                               onTap: _triggerOverlay,
@@ -1600,7 +1573,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT HOẶC CÔNG TẮC BỊ TẮT
                       IconButton(
                         icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                         onPressed: _addNewBeacon 
@@ -1694,7 +1666,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         }
                       },
                       onLongPress: (_, latlng) {
-                        // CHẶN THÊM ĐIỂM BẰNG CÁCH NHẤN GIỮ BẢN ĐỒ
                         if (_isActionBlocked()) {
                           _showPaymentDialog();
                           return;

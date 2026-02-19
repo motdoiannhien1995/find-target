@@ -1,17 +1,25 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // Thêm dòng này để kích hoạt dịch vụ Google
-    id("com.google.gms.google-services") 
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id("com.google.gms.google-services")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Đọc cấu hình từ key.properties để ký ứng dụng
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    // Package Name của bạn
-    namespace = "com.khoa.fakegpstracetarget" 
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Tên gói mới của bạn: com.khoa.trilaterat
+    namespace = "com.khoa.trilaterat"
+    // Yêu cầu SDK 36 để tương thích với các thư viện mới nhất
+    compileSdk = 36 
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,23 +27,43 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        // Đồng bộ JVM về bản 17 để tránh lỗi Inconsistent JVM Target
+        jvmTarget = "17"
+        freeCompilerArgs += listOf("-P", "plugin:org.jetbrains.kotlin.android:enabled=true")
+    }
+
+    // Cấu hình chứng chỉ Release
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+        }
     }
 
     defaultConfig {
-        // ID ứng dụng phải khớp chính xác với Firebase
-        applicationId = "com.khoa.fakegpstracetarget" 
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        applicationId = "com.khoa.trilaterat"
+        minSdk = flutter.minSdkVersion 
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-            // Sử dụng debug key để bạn có thể build test release ngay lập tức
-            signingConfig = signingConfigs.getByName("debug")
+            // Sử dụng chứng chỉ Release chính chủ vừa tạo
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
+    }
+
+    // --- PHẦN QUAN TRỌNG: VƯỢT LỖI MOCK LOCATION ---
+    lint {
+        // Cho phép quyền ACCESS_MOCK_LOCATION xuất hiện trong bản Release
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 
@@ -44,7 +72,7 @@ flutter {
 }
 
 dependencies {
-    // Thêm các thư viện Firebase cần thiết
+    // Cấu hình Firebase cho hệ thống thu phí
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-firestore")

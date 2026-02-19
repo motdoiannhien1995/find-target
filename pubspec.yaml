@@ -1,5 +1,5 @@
-name: trilateration_app
-description: "App xác định tọa độ điểm B bằng hình học Trilateration."
+name: trilaterat_tool
+description: "App xác định tọa độ bằng hình học Trilateration."
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -39,6 +39,8 @@ dependencies:
 
   screenshot: ^3.0.0
   gal: ^2.3.2
+
+  change_app_package_name: ^1.1.0  # Thêm dòng này và
 
 dev_dependencies:
   flutter_test:
