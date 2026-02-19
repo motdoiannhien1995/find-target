@@ -263,7 +263,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   
   final List<Color> colorPalette = [Colors.orange, Colors.teal, Colors.pink, Colors.brown, Colors.indigo, Colors.lime];
 
-  // Biến lưu trữ lại ô nào đang được focus trước khi ẩn app
   int? _lastFocusedIndex;
 
   @override
@@ -290,28 +289,21 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // --- LOGIC PHỤC HỒI BÀN PHÍM CỰC MẠNH ---
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      // Khi app sắp bị ẩn đi (bấm qua app khác)
-      // Tìm xem ô nào đang được gõ phím
       int currentFocus = beacons.indexWhere((b) => b.focusNode.hasFocus);
       if (currentFocus != -1) {
         _lastFocusedIndex = currentFocus;
-        // Phải gỡ focus ngay lập tức để lát nữa gọi lại nó mới nhận diện là thao tác mới
         FocusManager.instance.primaryFocus?.unfocus();
       }
     } else if (state == AppLifecycleState.resumed) {
-      // Khi quay lại app
       if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) {
-            // Yêu cầu focus lại vào ô đã lưu
             beacons[_lastFocusedIndex!].focusNode.requestFocus();
-            // Chủ động gọi thẳng System Channel để ép bàn phím bung lên
             SystemChannels.textInput.invokeMethod('TextInput.show');
-            _lastFocusedIndex = null; // Xóa cờ lưu
+            _lastFocusedIndex = null; 
           }
         });
       }
@@ -575,11 +567,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return [k1, k2];
   }
 
+  // CẬP NHẬT 1: Bộ tối ưu hóa mở rộng 8 hướng thay vì 4 hướng và stepSize nhỏ hơn để chui lọt điểm 0m
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
     LatLng currentPos = startPoint;
     double stepSize = 0.001; 
-    double minStep = 0.0000001; 
-    int maxIterations = 3000; 
+    double minStep = 0.00000001; // Giảm bước chạy xuống mức siêu nhỏ (tầm centimet)
+    int maxIterations = 5000; 
     int iter = 0;
 
     while (stepSize > minStep && iter < maxIterations) {
@@ -593,6 +586,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         LatLng(currentPos.latitude - stepSize, currentPos.longitude),
         LatLng(currentPos.latitude, currentPos.longitude + stepSize),
         LatLng(currentPos.latitude, currentPos.longitude - stepSize),
+        // Thêm 4 hướng chéo để tránh kẹt ở nếp gấp địa hình lỗi
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude + stepSize),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude - stepSize),
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude - stepSize),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude + stepSize),
       ];
 
       for (var p in neighbors) {
@@ -613,41 +611,61 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return currentPos;
   }
 
+  // CẬP NHẬT 2: Trọng lượng lực hút (Gravity Weighting)
   double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     double totalError = 0;
     for (var b in beacons) {
+      if (b.location == null) continue;
       double d = _haversineDistance(p, b.location!);
       double r = _getRadiusInMeters(b);
-      totalError += pow(d - r, 2); 
+      if (r <= 0) continue; // Bỏ qua nếu r = 0 để tránh lỗi
+      
+      // Bán kính r càng NHỎ (điểm P càng GẦN), weight càng LỚN
+      // Điều này ép thuật toán coi trọng các vòng tròn nhỏ, bỏ qua sai số của vòng tròn to ở xa
+      double weight = 1000.0 / r; 
+      
+      totalError += weight * pow(d - r, 2); 
     }
     return totalError;
   }
 
+  // CẬP NHẬT 3: Quét mọi khả năng giao điểm thay vì chỉ P1-P2
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
 
-      LatLng p1 = validBeacons[0].location!;
-      LatLng p2 = validBeacons[1].location!;
-      double r1 = _getRadiusInMeters(validBeacons[0]);
-      double r2 = _getRadiusInMeters(validBeacons[1]);
+      List<LatLng> allRoots = [];
+      
+      // Sinh toàn bộ giao điểm của tất cả các cặp có thể (P1-P2, P2-P3, P1-P3...)
+      for (int i = 0; i < validBeacons.length - 1; i++) {
+         for (int j = i + 1; j < validBeacons.length; j++) {
+             double r1 = _getRadiusInMeters(validBeacons[i]);
+             double r2 = _getRadiusInMeters(validBeacons[j]);
+             var roots = _calculateTwoCircleIntersectionPrecise(validBeacons[i].location!, r1, validBeacons[j].location!, r2);
+             allRoots.addAll(roots);
+         }
+      }
 
-      var roots = _calculateTwoCircleIntersectionPrecise(p1, r1, p2, r2);
       LatLng bestStartNode;
       
-      if (roots.isEmpty) {
+      if (allRoots.isEmpty) {
+        // Không có đường tròn nào cắt nhau
         double sLat = 0, sLng = 0;
         for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
         bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
       } else {
-        if (roots.length == 2 && validBeacons.length >= 3) {
-           double err1 = _calculateTotalError(roots[0], validBeacons);
-           double err2 = _calculateTotalError(roots[1], validBeacons);
-           bestStartNode = (err1 < err2) ? roots[0] : roots[1];
-        } else {
-           bestStartNode = roots[0];
+        // Tìm giao điểm nào mà khi đặt K vào đó, "tổng sai số có trọng lượng" là thấp nhất
+        double minE = double.infinity;
+        bestStartNode = allRoots[0];
+        for (var root in allRoots) {
+            double e = _calculateTotalError(root, validBeacons);
+            if (e < minE) {
+                minE = e;
+                bestStartNode = root;
+            }
         }
       }
+      
       return _optimizePoint(bestStartNode, validBeacons);
   }
 
@@ -655,7 +673,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (index >= 0 && index < beacons.length) {
         beacons[index].focusNode.requestFocus();
-        SystemChannels.textInput.invokeMethod('TextInput.show'); // Ép gọi bàn phím
+        SystemChannels.textInput.invokeMethod('TextInput.show'); 
       }
     });
   }
@@ -1105,7 +1123,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  // HÀM MỚI: Logic thêm P được tách riêng biệt để gọn gàng hơn
   void _addNewBeacon() {
     if (beacons.isNotEmpty) {
       Beacon last = beacons.last;
