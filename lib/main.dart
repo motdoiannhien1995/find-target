@@ -614,7 +614,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       setState(() {}); 
     }
 
-    // ĐÃ DỌN SẠCH TIMER GÂY XUNG ĐỘT - Chỉ bắn lệnh 1 lần duy nhất cho Kotlin lo
     try { 
       platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
     } catch (e) { 
@@ -752,8 +751,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double d = _haversineDistance(p, b.location!);
       double r = _getRadiusInMeters(b);
       if (r <= 0) continue; 
-      double weight = 1000.0 / r; 
-      totalError += weight * pow(d - r, 2); 
+      // Dùng sai số tuyệt đối (L1 norm) thay vì bình phương (L2 norm) có trọng số
+      // Tránh việc điểm nhập sai bị phóng đại quá mức, kéo lệch tối ưu.
+      totalError += (d - r).abs(); 
     }
     return totalError;
   }
@@ -1320,11 +1320,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             if (allUnder100m) {
                 worstIndex = 0;
             } else {
-                double maxDist = -1;
+                // Sửa logic xóa điểm: Xóa điểm có sai số (khoảng cách thực tế - bán kính nhập) lớn nhất
+                double maxError = -1;
                 for (int k = 0; k < beacons.length; k++) {
-                  if (beacons[k].location != null) {
-                    double d = _haversineDistance(beacons[k].location!, finalPoint);
-                    if (d > maxDist) { maxDist = d; worstIndex = k; }
+                  if (beacons[k].location != null && beacons[k].controller.text.isNotEmpty) {
+                    double r = _getRadiusInMeters(beacons[k]);
+                    if (r > 0) {
+                        double d = _haversineDistance(beacons[k].location!, finalPoint);
+                        double error = (d - r).abs();
+                        if (error > maxError) { maxError = error; worstIndex = k; }
+                    }
                   }
                 }
             }

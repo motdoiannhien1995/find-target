@@ -22,16 +22,21 @@ class MainActivity: FlutterActivity() {
     @Volatile private var currentLng = 0.0
     @Volatile private var isMocking = false
     
+    // Nâng cấp lên HandlerThread chuẩn của Android
     private var mockHandlerThread: HandlerThread? = null
     private var mockHandler: Handler? = null
+    
+    // Vũ khí bí mật: WakeLock giúp CPU không giết app dưới nền
     private var wakeLock: PowerManager.WakeLock? = null
 
+    // Bắt buộc có "fused" để qua mặt Google Play Services
     private val providers = arrayOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         
+        // Khởi tạo hệ thống giữ CPU thức tỉnh
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MockGPS::WakeLock")
 
@@ -43,7 +48,7 @@ class MainActivity: FlutterActivity() {
                     if (!isMocking) {
                         startMock()
                     } else {
-                        // FIX ĐỘ TRỄ: Hủy đợi và ép vòng lặp đẩy tọa độ lên ngay lập tức!
+                        // ÉP CHẠY NGAY LẬP TỨC: Xóa hàng đợi cũ và post chạy ngay
                         mockHandler?.removeCallbacks(mockRunnable)
                         mockHandler?.post(mockRunnable)
                     }
@@ -96,7 +101,9 @@ class MainActivity: FlutterActivity() {
                     } catch (e: Throwable) {}
 
                     locationManager.setTestProviderLocation(provider, mockLocation)
-                } catch (e: Throwable) {}
+                } catch (e: Throwable) {
+                    // Dùng Throwable thay cho Exception để hấp thụ tuyệt đối mọi lỗi văng app
+                }
             }
             // Lặp lại sau mỗi 0.5 giây
             mockHandler?.postDelayed(this, 500)
@@ -117,6 +124,7 @@ class MainActivity: FlutterActivity() {
 
         isMocking = true
         
+        // Bật WakeLock để chặn hệ thống giết app (Giữ tối đa 60 phút mỗi lần bật)
         try {
             if (wakeLock?.isHeld == false) {
                 wakeLock?.acquire(60 * 60 * 1000L) 
