@@ -253,10 +253,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final ScreenshotController _screenshotController = ScreenshotController(); 
   Timer? _mockTimer;
 
-  // --- BIẾN QUẢN LÝ THU PHÍ ---
+  // --- BIẾN QUẢN LÝ THU PHÍ & CÔNG TẮC ---
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 5; 
+  final int maxTrial = 50;    // 50 lượt dùng thử
+  bool allowTrialFromServer = true; 
   String? deviceId;
 
   List<Beacon> beacons = [];
@@ -289,44 +290,59 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); 
-    _checkDeviceStatus(); // Kiểm tra thiết bị trên Firebase khi mở app
+    _checkStatus(); 
     _initLocation();
     _loadData(); 
     _requestOverlayPermission();
   }
 
   // ======================================================
-  // HỆ THỐNG THU PHÍ: KIỂM TRA MÁY & THANH TOÁN
+  // HỆ THỐNG THU PHÍ: KIỂM TRA MÁY & CÔNG TẮC TỪ XA
+  // ĐÃ SỬA LỖI CHỐNG VẤP ĐỂ NGĂN XÓA DỮ LIỆU APP LÁCH LUẬT
   // ======================================================
 
-  Future<void> _checkDeviceStatus() async {
-    try {
-      final androidIdPlugin = AndroidId();
-      deviceId = await androidIdPlugin.getId();
-      
-      if (deviceId == null) return;
+  Future<void> _checkStatus() async {
+    final androidIdPlugin = const AndroidId();
+    deviceId = await androidIdPlugin.getId();
+    if (deviceId == null) return;
 
-      final doc = await FirebaseFirestore.instance.collection('devices').doc(deviceId).get();
-      
+    // 1. ĐỌC CÔNG TẮC TỪ FIREBASE (Tách riêng try-catch)
+    try {
+      final adminDoc = await FirebaseFirestore.instance.collection('trace_target').doc('config').get();
+      if (adminDoc.exists) {
+        if (mounted) {
+          setState(() {
+            allowTrialFromServer = adminDoc.data()?['allow_trial'] ?? true;
+          });
+        }
+      }
+    } catch (e) {
+      print("Lỗi đọc công tắc trace_target: $e");
+    }
+
+    // 2. ĐỌC/GHI DỮ LIỆU THIẾT BỊ (Tách riêng, đảm bảo luôn chạy dù bước 1 có lỗi)
+    try {
+      final doc = await FirebaseFirestore.instance.collection('devices').doc(deviceId!).get();
       if (doc.exists) {
-        setState(() {
-          isPro = doc.data()?['isPro'] ?? false;
-          trialCount = doc.data()?['trialCount'] ?? 0;
-        });
+        if (mounted) {
+          setState(() {
+            isPro = doc.data()?['isPro'] ?? false;
+            trialCount = doc.data()?['trialCount'] ?? 0;
+          });
+        }
       } else {
-        await FirebaseFirestore.instance.collection('devices').doc(deviceId).set({
+        await FirebaseFirestore.instance.collection('devices').doc(deviceId!).set({
           'trialCount': 0,
           'isPro': false,
           'lastUsed': FieldValue.serverTimestamp(),
         });
       }
     } catch (e) {
-      print("Lỗi kết nối Firebase");
+      print("Lỗi kết nối Firebase Thiết bị: $e");
     }
   }
 
   void _showPaymentDialog() {
-    // THÔNG TIN TÀI KHOẢN CỦA DO NGOC KHOA
     String bankId = "TPB"; 
     String accountNo = "05805024701"; 
     String amount = "50000"; 
@@ -339,65 +355,66 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         title: const Text("Mở khóa bản PRO vĩnh viễn", textAlign: TextAlign.center),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Bạn đã hết 5 lượt dùng thử Mock Location.\nQuét mã QR để nâng cấp bản PRO nhé:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 15),
-            
-            // --- KHUNG CHỤP ẢNH MÃ QR ---
-            Screenshot(
-              controller: _screenshotController,
-              child: Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(10),
-                child: Image.network(qrUrl, height: 200, width: 200),
-              ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView( // FIX TRÀN VIỀN
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Bạn đã hết 50 lượt dùng thử.\nQuét mã QR dưới đây để thanh toán nâng cấp PRO:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 15),
+                Screenshot(
+                  controller: _screenshotController,
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.all(10),
+                    child: Image.network(qrUrl, height: 180, width: 180), 
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade50,
+                    foregroundColor: Colors.blue.shade800,
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    try {
+                      final image = await _screenshotController.capture();
+                      if (image != null) {
+                        final tempDir = await getTemporaryDirectory();
+                        final file = await File('${tempDir.path}/thanh_toan_qr.png').create();
+                        await file.writeAsBytes(image);
+                        await Gal.putImage(file.path); 
+                        _showMsg("Đã lưu mã QR vào thư viện ảnh!");
+                      }
+                    } catch (e) {
+                      _showMsg("Lỗi tải ảnh. Vui lòng cấp quyền bộ nhớ.");
+                    }
+                  },
+                  icon: const Icon(Icons.download, size: 18),
+                  label: const Text("Tải mã QR về máy", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                ),
+                const Divider(),
+                const Text("Ngân hàng: TPBank", style: TextStyle(fontSize: 12)),
+                const Text("Chủ TK: DO NGOC KHOA", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                const Text("Giá: 50.000 VNĐ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 10),
+                SelectableText("Mã máy: $deviceId", style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+                const Text("(Vui lòng giữ nguyên nội dung chuyển khoản)", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+              ],
             ),
-            const SizedBox(height: 10),
-            
-            // --- NÚT TẢI MÃ QR ---
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade50,
-                foregroundColor: Colors.blue.shade800,
-                elevation: 0,
-              ),
-              onPressed: () async {
-                try {
-                  final image = await _screenshotController.capture();
-                  if (image != null) {
-                    final tempDir = await getTemporaryDirectory();
-                    final file = await File('${tempDir.path}/thanh_toan_qr.png').create();
-                    await file.writeAsBytes(image);
-                    await Gal.putImage(file.path); 
-                    _showMsg("Đã lưu mã QR vào thư viện ảnh!");
-                  }
-                } catch (e) {
-                  _showMsg("Lỗi tải ảnh. Vui lòng cấp quyền bộ nhớ.");
-                }
-              },
-              icon: const Icon(Icons.download, size: 18),
-              label: const Text("Tải mã QR về máy", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-            ),
-            
-            const Divider(),
-            const Text("Ngân hàng: TPBank", style: TextStyle(fontSize: 12)),
-            const Text("Chủ TK: DO NGOC KHOA", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            const Text("Giá: 50.000 VNĐ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-            const SizedBox(height: 10),
-            SelectableText("Mã máy: $deviceId", style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
-            const Text("(Vui lòng giữ nguyên nội dung chuyển khoản)", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-          ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Để sau")),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _checkDeviceStatus(); 
+              _checkStatus(); 
               _showMsg("Đang cập nhật trạng thái PRO...");
             }, 
             child: const Text("Đã thanh toán")
@@ -405,6 +422,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  // --- HÀM KIỂM TRA CHẶN ---
+  bool _isActionBlocked() {
+    if (isPro) return false; 
+    if (!allowTrialFromServer) return true; 
+    if (trialCount >= maxTrial) return true; 
+    return false;
   }
 
   // ======================================================
@@ -576,7 +601,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } catch (e) { _showMsg("Lỗi lấy danh sách app"); }
   }
 
-  // KHÔNG KHÓA NÚT NỔI NỮA
   Future<void> _triggerOverlay() async {
     if (targetAppPackage == null) {
       _showMsg("Chưa chọn App! Vui lòng chọn App trước.");
@@ -608,8 +632,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
-    // KHÓA MOCK GPS NẾU HẾT LƯỢT DÙNG THỬ
-    if (!isPro && trialCount >= maxTrial) {
+    if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
     }
@@ -617,7 +640,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (!isPro) {
       trialCount++;
       if (deviceId != null) {
-         FirebaseFirestore.instance.collection('devices').doc(deviceId).update({'trialCount': trialCount});
+         // !!! FIX LỖI ÉP ĐỒNG BỘ: Sử dụng "await set(..., merge: true)" để lưu Firebase lập tức
+         await FirebaseFirestore.instance.collection('devices').doc(deviceId!).set({
+           'trialCount': trialCount,
+           'lastUsed': FieldValue.serverTimestamp(),
+         }, SetOptions(merge: true)).catchError((e) {
+           print("Lỗi lưu lên Firebase: $e");
+         });
       }
       setState(() {}); 
     }
@@ -629,7 +658,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     
-    // Luôn cho phép nổi overlay nếu đã cấu hình
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
       _showInvincibleOverlay(); 
     }
@@ -1263,8 +1291,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   // CẬP NHẬT: CHẶN THÊM ĐIỂM NGAY TẠI NÚT (+)
   void _addNewBeacon() {
-    // KIỂM TRA CHẶN NGAY TỪ NÚT (+) VÀ GỌI BẢNG THANH TOÁN
-    if (!isPro && trialCount >= maxTrial) {
+    // SỬ DỤNG HÀM KIỂM TRA CHẶN
+    if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
     }
@@ -1570,7 +1598,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT
+                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT HOẶC CÔNG TẮC BỊ TẮT
                       IconButton(
                         icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                         onPressed: _addNewBeacon 
@@ -1664,8 +1692,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         }
                       },
                       onLongPress: (_, latlng) {
-                        // CHẶN THÊM ĐIỂM BẰNG CÁCH NHẤN GIỮ BẢN ĐỒ NẾU HẾT LƯỢT
-                        if (!isPro && trialCount >= maxTrial) {
+                        // CHẶN THÊM ĐIỂM BẰNG CÁCH NHẤN GIỮ BẢN ĐỒ
+                        if (_isActionBlocked()) {
                           _showPaymentDialog();
                           return;
                         }
@@ -1749,4 +1777,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} // ok nhé
