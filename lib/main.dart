@@ -24,10 +24,14 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:installed_apps/app_info.dart';
 
-// --- FIREBASE VÀ THU PHÍ (THÊM MỚI) ---
+// --- FIREBASE VÀ THU PHÍ ---
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:android_id/android_id.dart';
+
+// --- THƯ VIỆN TẢI ẢNH QR ---
+import 'package:screenshot/screenshot.dart';
+import 'package:gal/gal.dart';
 
 // ==========================================
 // PHẦN 1: ENTRY POINT CHO OVERLAY (CỬA SỔ NỔI)
@@ -71,7 +75,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _targetPackage = prefs.getString('target_app_package');
       });
     } catch (e) {
-      print("Overlay lỗi đọc disk: $e");
+      print("Overlay lỗi đọc disk");
     }
   }
 
@@ -80,7 +84,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       bool? success = await InstalledApps.startApp(pkg);
       if (success == true) return; 
     } catch (e) {
-      print("Cách 1 lỗi: $e");
+      print("Cách 1 lỗi");
     }
 
     try {
@@ -246,6 +250,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.example.mock/gps');
   final MapController _mapController = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
+  final ScreenshotController _screenshotController = ScreenshotController(); 
   Timer? _mockTimer;
 
   // --- BIẾN QUẢN LÝ THU PHÍ ---
@@ -296,7 +301,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   Future<void> _checkDeviceStatus() async {
     try {
-      const androidIdPlugin = AndroidId();
+      final androidIdPlugin = AndroidId();
       deviceId = await androidIdPlugin.getId();
       
       if (deviceId == null) return;
@@ -316,16 +321,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         });
       }
     } catch (e) {
-      print("Lỗi kết nối Firebase: $e");
+      print("Lỗi kết nối Firebase");
     }
   }
 
   void _showPaymentDialog() {
-    // TẠO MÃ QR THANH TOÁN (THAY ĐỔI THÔNG TIN CỦA BẠN Ở ĐÂY)
-    String bankId = "MB"; // Tên viết tắt ngân hàng (VD: VCB, BIDV, TCB, MB)
-    String accountNo = "0123456789"; // Số tài khoản của bạn
-    String amount = "50000"; // Giá bán
-    String description = "PRO $deviceId"; // Cú pháp nội dung chuyển khoản tự động
+    // THÔNG TIN TÀI KHOẢN CỦA DO NGOC KHOA
+    String bankId = "TPB"; 
+    String accountNo = "05805024701"; 
+    String amount = "50000"; 
+    String description = "PRO $deviceId"; 
     
     String encodedDesc = Uri.encodeComponent(description);
     String qrUrl = "https://img.vietqr.io/image/$bankId-$accountNo-compact.png?amount=$amount&addInfo=$encodedDesc";
@@ -338,13 +343,52 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Bạn đã hết 5 lượt dùng thử Mock Location.\nQuét mã QR dưới đây để nâng cấp:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
+            const Text("Bạn đã hết 5 lượt dùng thử Mock Location.\nQuét mã QR để nâng cấp bản PRO nhé:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
             const SizedBox(height: 15),
-            Image.network(qrUrl, height: 200, width: 200),
+            
+            // --- KHUNG CHỤP ẢNH MÃ QR ---
+            Screenshot(
+              controller: _screenshotController,
+              child: Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(10),
+                child: Image.network(qrUrl, height: 200, width: 200),
+              ),
+            ),
             const SizedBox(height: 10),
-            Text("Giá: 50.000 VNĐ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade700)),
+            
+            // --- NÚT TẢI MÃ QR ---
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade50,
+                foregroundColor: Colors.blue.shade800,
+                elevation: 0,
+              ),
+              onPressed: () async {
+                try {
+                  final image = await _screenshotController.capture();
+                  if (image != null) {
+                    final tempDir = await getTemporaryDirectory();
+                    final file = await File('${tempDir.path}/thanh_toan_qr.png').create();
+                    await file.writeAsBytes(image);
+                    await Gal.putImage(file.path); 
+                    _showMsg("Đã lưu mã QR vào thư viện ảnh!");
+                  }
+                } catch (e) {
+                  _showMsg("Lỗi tải ảnh. Vui lòng cấp quyền bộ nhớ.");
+                }
+              },
+              icon: const Icon(Icons.download, size: 18),
+              label: const Text("Tải mã QR về máy", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            ),
+            
+            const Divider(),
+            const Text("Ngân hàng: TPBank", style: TextStyle(fontSize: 12)),
+            const Text("Chủ TK: DO NGOC KHOA", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
-            SelectableText("ID Máy: $deviceId", style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+            const Text("Giá: 50.000 VNĐ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+            const SizedBox(height: 10),
+            SelectableText("Mã máy: $deviceId", style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
             const Text("(Vui lòng giữ nguyên nội dung chuyển khoản)", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
           ],
         ),
@@ -353,7 +397,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _checkDeviceStatus(); // Load lại từ Firebase xem bạn đã bật Pro chưa
+              _checkDeviceStatus(); 
               _showMsg("Đang cập nhật trạng thái PRO...");
             }, 
             child: const Text("Đã thanh toán")
@@ -452,7 +496,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         ),
       );
     } catch(e) {
-      print("Lỗi fit camera: $e");
+      print("Lỗi fit camera");
     }
   }
 
@@ -529,17 +573,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           ),
         ),
       );
-    } catch (e) { _showMsg("Lỗi lấy danh sách app: $e"); }
+    } catch (e) { _showMsg("Lỗi lấy danh sách app"); }
   }
 
+  // KHÔNG KHÓA NÚT NỔI NỮA
   Future<void> _triggerOverlay() async {
-    // ÉP MUA PRO: KHÓA NÚT NỔI VỚI NGƯỜI DÙNG FREE
-    if (!isPro) {
-      _showMsg("Cửa sổ nổi là tính năng dành riêng cho bản PRO!");
-      _showPaymentDialog();
-      return;
-    }
-
     if (targetAppPackage == null) {
       _showMsg("Chưa chọn App! Vui lòng chọn App trước.");
       _pickTargetApp();
@@ -570,13 +608,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
-    // BƯỚC 1: KIỂM TRA QUYỀN TRUY CẬP (THU PHÍ)
+    // KHÓA MOCK GPS NẾU HẾT LƯỢT DÙNG THỬ
     if (!isPro && trialCount >= maxTrial) {
-      _showPaymentDialog(); // Hiện bảng đòi tiền
-      return; // CHẶN LẠI KHÔNG CHO CHẠY MOCK
+      _showPaymentDialog(); 
+      return; 
     }
 
-    // BƯỚC 2: CỘNG LƯỢT NẾU CHƯA PRO
     if (!isPro) {
       trialCount++;
       if (deviceId != null) {
@@ -585,17 +622,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       setState(() {}); 
     }
 
-    // BƯỚC 3: CHẠY LOGIC MOCK CŨ
     _mockTimer?.cancel();
     void pushMock() {
-      try { platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); } catch (e) { print("Lỗi Mock: $e"); }
+      try { platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); } catch (e) { print("Lỗi Mock"); }
     }
     pushMock();
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     
+    // Luôn cho phép nổi overlay nếu đã cấu hình
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
-      // Chỉ bật nếu là Pro (nếu lọt xuống đây thì mặc định là đang trial hoặc đã Pro)
-      if (isPro) _showInvincibleOverlay(); 
+      _showInvincibleOverlay(); 
     }
     
     _updateCurrentInfo(LatLng(lat, lng));
@@ -620,9 +656,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } catch (e) { print(e); }
   }
 
-  // ======================================================
-  // PHẦN THUẬT TOÁN TÍNH TOÁN (Giữ nguyên)
-  // ======================================================
+  // --- LOGIC TÍNH TOÁN ---
 
   double _toRadians(double degree) => degree * pi / 180.0;
   double _toDegrees(double radian) => radian * 180.0 / pi;
@@ -872,7 +906,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       });
       _mapController.move(finalPos, 16);
       _setMock(finalPos.latitude, finalPos.longitude);
-    } catch (e) { _showMsg("Lỗi: $e"); }
+    } catch (e) { _showMsg("Lỗi"); }
   }
 
   Future<void> _resetCurrentBeacon() async {
@@ -1128,7 +1162,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 1)));
+  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 2)));
 
   void _showSearchOptions() {
     if (searchMarker == null) return;
@@ -1227,7 +1261,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
+  // CẬP NHẬT: CHẶN THÊM ĐIỂM NGAY TẠI NÚT (+)
   void _addNewBeacon() {
+    // KIỂM TRA CHẶN NGAY TỪ NÚT (+) VÀ GỌI BẢNG THANH TOÁN
+    if (!isPro && trialCount >= maxTrial) {
+      _showPaymentDialog(); 
+      return; 
+    }
+
     if (beacons.isNotEmpty) {
       Beacon last = beacons.last;
       if (last.location == null || last.controller.text.trim().isEmpty) {
@@ -1473,13 +1514,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   ),
                   const Divider(height: 10),
                   
-                  // HÀNG GỘP ĐƠN VỊ & CÁC NÚT (TÌM KIẾM, OVERLAY)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 2.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Cụm 1: Các nút đơn vị (màu xanh dương)
                         Expanded(
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
@@ -1487,10 +1526,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               children: availableUnits.map((unit) => Padding(
                                 padding: const EdgeInsets.only(right: 6.0),
                                 child: ChoiceChip(
-                                  showCheckmark: false, // Ẩn dấu tick
+                                  showCheckmark: false, 
                                   label: Text(unit, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: activeUnitForChip == unit ? Colors.white : Colors.black87)), 
                                   selected: activeUnitForChip == unit, 
-                                  selectedColor: Colors.blue, // Chuyển sang xanh thay vì tím
+                                  selectedColor: Colors.blue, 
                                   backgroundColor: Colors.grey.shade200,
                                   visualDensity: VisualDensity.compact,
                                   onSelected: (val) {
@@ -1502,7 +1541,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           ),
                         ),
                         
-                        // Cụm 2: Nút nổi và nút tìm kiếm (bên phải)
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1529,17 +1567,15 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     ),
                   ),
 
-                  // HÀNG 7 NÚT (SẼ KHÔNG BỊ CO GIÃN KHI ẨN DO DÙNG MAINTAINSIZE: TRUE)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // 1. Nút (+) thêm P - Luôn hiển thị
+                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT
                       IconButton(
                         icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
-                        onPressed: _addNewBeacon
+                        onPressed: _addNewBeacon 
                       ),
 
-                      // 2. Nút Xóa tất cả (thùng rác)
                       Visibility(
                         visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -1561,28 +1597,24 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         ),
                       ),
 
-                      // 3. Nút Gán P1
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
                         child: IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
                       ),
                       
-                      // 4. Nút Gán P tiếp theo
                       Visibility(
                         visible: targetPoints.isNotEmpty,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
                         child: IconButton(icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28), onPressed: _assignResultToNextP),
                       ),
                       
-                      // 5. Nút Refresh
                       Visibility(
                         visible: selectedIndex != null,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
                         child: IconButton(icon: const Icon(Icons.refresh, color: Colors.orange, size: 28), onPressed: _resetCurrentBeacon),
                       ),
                       
-                      // 6. Nút Play/Stop
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -1598,7 +1630,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         ),
                       ),
                       
-                      // 7. Nút Save
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
                         maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -1633,6 +1664,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         }
                       },
                       onLongPress: (_, latlng) {
+                        // CHẶN THÊM ĐIỂM BẰNG CÁCH NHẤN GIỮ BẢN ĐỒ NẾU HẾT LƯỢT
+                        if (!isPro && trialCount >= maxTrial) {
+                          _showPaymentDialog();
+                          return;
+                        }
+
                         int targetIndex = -1;
                         String unitToUse = 'km'; 
                         if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
@@ -1712,4 +1749,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}//
+}
