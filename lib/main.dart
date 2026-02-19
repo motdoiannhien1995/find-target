@@ -233,13 +233,13 @@ class MockApp extends StatefulWidget {
   State<MockApp> createState() => _MockAppState();
 }
 
-class _MockAppState extends State<MockApp> {
+class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.example.mock/gps');
   final MapController _mapController = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _mockTimer;
 
-  List<Beacon> beacons = [Beacon(color: Colors.blue, unit: 'km')];
+  List<Beacon> beacons = [];
   List<SavedTarget> savedTargets = [];
   
   String defaultUnit = 'km'; 
@@ -247,12 +247,10 @@ class _MockAppState extends State<MockApp> {
   final List<String> availableUnits = ['m', 'km', 'ft', 'mi'];
 
   int? selectedIndex; 
-  // Biến targetPoints giờ chỉ dùng để lưu điểm K tính toán được để hiển thị marker, không dùng navigation nữa
   List<LatLng> targetPoints = [];
   LatLng? myRealLocation;
   LatLng? searchMarker; 
   
-  // Hiển thị thông tin
   String coordDisplay = "0.000000, 0.000000";
   String addressDisplay = "Chưa có vị trí";
   Color addressColor = Colors.grey; 
@@ -268,6 +266,7 @@ class _MockAppState extends State<MockApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); 
     _initLocation();
     _loadData(); 
     _requestOverlayPermission();
@@ -280,6 +279,7 @@ class _MockAppState extends State<MockApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _mockTimer?.cancel();
     _mapController.dispose();
     _searchCtrl.dispose();
@@ -287,14 +287,79 @@ class _MockAppState extends State<MockApp> {
     super.dispose();
   }
 
-  // --- HÀM HELPER: TÍNH BÁN KÍNH ---
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _restoreKeyboardFocus();
+    }
+  }
+
+  void _restoreKeyboardFocus() {
+    if (selectedIndex != null && selectedIndex! < beacons.length) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          beacons[selectedIndex!].focusNode.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+    }
+  }
+
   double _getRadiusInMeters(Beacon b) {
     double inputVal = double.tryParse(b.controller.text) ?? 0;
     if (inputVal == 0) return 0;
     return inputVal * unitToMeter[b.unit]!;
   }
 
-  // --- LOGIC LẤY ĐỊA CHỈ (REVERSE GEOCODING) ---
+  void _zoomToFitAll() {
+    if (beacons.isEmpty) return;
+
+    double minLat = 90.0;
+    double maxLat = -90.0;
+    double minLng = 180.0;
+    double maxLng = -180.0;
+    bool hasValid = false;
+
+    for (var b in beacons) {
+      if (b.location == null) continue;
+      hasValid = true;
+
+      double r = _getRadiusInMeters(b);
+      if (r <= 0) r = 100; 
+
+      double latBuffer = r / 111000.0;
+      double lngBuffer = r / (111000.0 * cos(_toRadians(b.location!.latitude)));
+
+      double top = b.location!.latitude + latBuffer;
+      double bottom = b.location!.latitude - latBuffer;
+      double right = b.location!.longitude + lngBuffer;
+      double left = b.location!.longitude - lngBuffer;
+
+      if (bottom < minLat) minLat = bottom;
+      if (top > maxLat) maxLat = top;
+      if (left < minLng) minLng = left;
+      if (right > maxLng) maxLng = right;
+    }
+
+    if (!hasValid) {
+      if (myRealLocation != null) {
+         _mapController.move(myRealLocation!, 15);
+      }
+      return;
+    }
+
+    try {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng)),
+          padding: const EdgeInsets.all(50), 
+        ),
+      );
+    } catch(e) {
+      print("Lỗi fit camera: $e");
+    }
+  }
+
   Future<void> _updateCurrentInfo(LatLng pos) async {
     setState(() {
       coordDisplay = "${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}";
@@ -326,7 +391,6 @@ class _MockAppState extends State<MockApp> {
     }
   }
 
-  // --- LOGIC CHỌN APP ---
   Future<void> _pickTargetApp() async {
     _showMsg("Đang quét danh sách ứng dụng...");
     try {
@@ -392,7 +456,6 @@ class _MockAppState extends State<MockApp> {
     );
   }
 
-  // --- LOGIC MOCK GPS ---
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
     _mockTimer?.cancel();
     void pushMock() {
@@ -402,7 +465,6 @@ class _MockAppState extends State<MockApp> {
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     _showInvincibleOverlay(); 
     
-    // Cập nhật thông tin địa chỉ
     _updateCurrentInfo(LatLng(lat, lng));
 
     if (mounted) {
@@ -685,20 +747,15 @@ class _MockAppState extends State<MockApp> {
              double dist1 = _haversineDistance(currentP3, k1);
              double dist2 = _haversineDistance(currentP3, k2);
 
-             LatLng newPos;
-             if (dist1 < dist2) {
-                newPos = k2; 
-             } else {
-                newPos = k1; 
-             }
+             // Lấy điểm K gần với vị trí P3 hiện tại nhất (tính lại K cập nhật theo dữ liệu P1, P2)
+             LatLng newPos = (dist1 < dist2) ? k1 : k2;
 
              setState(() {
                beacons[index].location = newPos;
-               beacons[index].controller.clear(); 
                targetPoints.clear(); 
              });
              _setMock(newPos.latitude, newPos.longitude);
-             _mapController.move(newPos, 17);
+             _zoomToFitAll(); 
              return; 
            }
        }
@@ -742,6 +799,7 @@ class _MockAppState extends State<MockApp> {
     _requestFocus(index); 
     _mapController.move(newPos, _mapController.camera.zoom);
     _setMock(newPos.latitude, newPos.longitude);
+    _zoomToFitAll(); 
   }
 
   void _restartWithResultAsP1() {
@@ -924,24 +982,6 @@ class _MockAppState extends State<MockApp> {
 
   void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 1)));
 
-  void _showInstructions() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(children: [Icon(Icons.help_outline, color: Colors.blue), SizedBox(width: 10), Text("Hướng dẫn")]),
-        content: const SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text("1. Nhập khoảng cách cho các điểm P."),
-            Text("2. Thanh ở trên dùng để đổi đơn vị cho P đang nhập liệu hoặc đang Mock."),
-            Text("3. Nút (+) tạo P mới. Nếu có >3P, nó sẽ tự động xóa P xa nhất và thay bằng K mới tính được."),
-            Text("4. NHẤN GIỮ NÚT NỔI để ĐÓNG ứng dụng."),
-          ]),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
-      ),
-    );
-  }
-
   void _showSearchOptions() {
     if (searchMarker == null) return;
     String coords = "${searchMarker!.latitude.toStringAsFixed(6)}, ${searchMarker!.longitude.toStringAsFixed(6)}";
@@ -985,6 +1025,7 @@ class _MockAppState extends State<MockApp> {
       targetPoints.clear(); 
     });
     _showMsg("Đã xóa P${index + 1} cũ");
+    _zoomToFitAll(); 
   }
 
   void _showTargetOptions(int index) {
@@ -1038,6 +1079,160 @@ class _MockAppState extends State<MockApp> {
     });
   }
 
+  // HÀM MỚI: Logic thêm P được tách riêng biệt để gọn gàng hơn
+  void _addNewBeacon() {
+    if (beacons.isNotEmpty) {
+      Beacon last = beacons.last;
+      if (last.location == null || last.controller.text.trim().isEmpty) {
+        _showMsg("P${beacons.length} chưa hoàn thành!");
+        return;
+      }
+    }
+
+    setState(() {
+      String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
+
+      if (beacons.length >= 3) {
+        LatLng? bestK = _internalCalculateBestFit();
+
+        int countM = beacons.where((b) => b.unit == 'm').length;
+        int countKm = beacons.where((b) => b.unit == 'km').length;
+        int countMi = beacons.where((b) => b.unit == 'mi').length;
+        int countFt = beacons.where((b) => b.unit == 'ft').length;
+
+        bool isRefereeMode = (countM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
+        LatLng? finalPoint;
+
+        if (isRefereeMode) {
+            String pairUnit = (countM == 2) ? 'm' : 'mi';
+            var pair = beacons.where((b) => b.unit == pairUnit).toList();
+            var referee = beacons.firstWhere((b) => b.unit != pairUnit);
+            
+            if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
+                 var roots = _calculateTwoCircleIntersectionPrecise(
+                    pair[0].location!, _getRadiusInMeters(pair[0]), 
+                    pair[1].location!, _getRadiusInMeters(pair[1])
+                 );
+                 
+                 if (roots.length == 2) {
+                     double rRef = _getRadiusInMeters(referee);
+                     
+                     double distRefToK1 = _haversineDistance(referee.location!, roots[0]);
+                     double errorRadius1 = (distRefToK1 - rRef).abs();
+                     double errorFit1 = bestK != null ? _haversineDistance(bestK, roots[0]) : 0;
+                     double totalScore1 = errorRadius1 + errorFit1;
+
+                     double distRefToK2 = _haversineDistance(referee.location!, roots[1]);
+                     double errorRadius2 = (distRefToK2 - rRef).abs();
+                     double errorFit2 = bestK != null ? _haversineDistance(bestK, roots[1]) : 0;
+                     double totalScore2 = errorRadius2 + errorFit2;
+
+                     finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
+                 }
+            }
+        }
+
+        if (finalPoint == null && bestK != null) {
+           finalPoint = bestK;
+        }
+
+        if (finalPoint != null) {
+            bool allUnder100m = true;
+            for (var b in beacons) {
+                double r = _getRadiusInMeters(b);
+                if (r >= 100 || r == 0) {
+                    allUnder100m = false;
+                    break;
+                }
+            }
+
+            int worstIndex = -1;
+
+            if (allUnder100m) {
+                worstIndex = 0;
+            } else {
+                double maxDist = -1;
+                for (int k = 0; k < beacons.length; k++) {
+                  if (beacons[k].location != null) {
+                    double d = _haversineDistance(beacons[k].location!, finalPoint);
+                    if (d > maxDist) { maxDist = d; worstIndex = k; }
+                  }
+                }
+            }
+
+            if (worstIndex != -1) {
+              beacons[worstIndex].dispose();
+              beacons.removeAt(worstIndex);
+            }
+
+            beacons.add(Beacon(location: finalPoint, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
+            
+            selectedIndex = beacons.length - 1;
+            targetPoints.clear();
+            isMockingTarget = false;
+            
+            _setMock(finalPoint.latitude, finalPoint.longitude);
+            _zoomToFitAll();
+            _requestFocus(beacons.length - 1); 
+            return; 
+        }
+      }
+      
+      LatLng? finalPos; 
+      bool autoPlaced = false;
+
+      if (beacons.isEmpty) {
+        finalPos = myRealLocation ?? _mapController.camera.center;
+        autoPlaced = true;
+      }
+
+      if (beacons.length >= 2) {
+        var b1 = beacons[0];
+        var b2 = beacons[1];
+        if (b1.location != null && b1.controller.text.isNotEmpty &&
+            b2.location != null && b2.controller.text.isNotEmpty) {
+            try {
+              double r1 = _getRadiusInMeters(b1);
+              double r2 = _getRadiusInMeters(b2);
+              List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+              if (intersections.isNotEmpty) {
+                finalPos = intersections[0]; 
+                autoPlaced = true;
+              }
+            } catch (e) {}
+        }
+      }
+      
+      if (!autoPlaced) {
+        int newIndex = beacons.length; 
+        if (newIndex > 0) {
+           Beacon prevBeacon = beacons[newIndex - 1];
+           if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
+                   double? r = double.tryParse(prevBeacon.controller.text);
+                   if (r != null && r > 0) {
+                        double distMeters = _getRadiusInMeters(prevBeacon);
+                        LatLng center = prevBeacon.location!;
+                        double bearing = _calculateOptimalBearing(center, newIndex);
+                        finalPos = _calculatePointFromBearing(center, distMeters, bearing);
+                   }
+           }
+        }
+      }
+
+      if (finalPos != null) {
+        beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
+        selectedIndex = beacons.length - 1;
+        targetPoints.clear();
+        isMockingTarget = false;
+        _setMock(finalPos!.latitude, finalPos!.longitude);
+        _zoomToFitAll();
+      } else {
+        beacons.add(Beacon(color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
+      }
+      _requestFocus(beacons.length - 1); 
+    });
+  }
+
   // --- BUILD UI ---
   @override
   Widget build(BuildContext context) {
@@ -1052,7 +1247,7 @@ class _MockAppState extends State<MockApp> {
 
     bool isAnyMocking = isMockingTarget || selectedIndex != null;
     return Scaffold(
-      resizeToAvoidBottomInset: true, 
+      resizeToAvoidBottomInset: false, 
       body: SafeArea(
         child: Column(
           children: [
@@ -1060,239 +1255,63 @@ class _MockAppState extends State<MockApp> {
               padding: const EdgeInsets.all(8), color: Colors.white,
               child: Column(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(onPressed: _showInstructions, icon: const Icon(Icons.help_outline, color: Colors.blue)),
-                      
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: availableUnits.map((unit) => Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 2),
-                              child: ChoiceChip(
-                                label: Text(unit, style: const TextStyle(fontSize: 10)), 
-                                selected: activeUnitForChip == unit, 
-                                onSelected: (val) {
-                                  if (val) _setUnitForSelectedBeacon(unit);
-                                },
-                              ),
-                            )).toList(),
-                          ),
-                        ),
-                      ),
-
-                      Row(
-                        children: [
-                            GestureDetector(
-                             onLongPress: _pickTargetApp, 
-                             child: IconButton(
-                              icon: Icon(Icons.layers, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey), 
-                              onPressed: _triggerOverlay, 
-                              tooltip: "Bật/Tắt Nút Nổi (Nhấn giữ để chọn App)",
-                             ),
-                            ),
-                            IconButton(
-                             icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue),
-                             onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
-                            ),
-                        ],
-                      )
-                    ],
-                  ),
                   SizedBox(
                     height: 70,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: beacons.length + 1,
-                      itemBuilder: (ctx, i) {
-                        if (i == beacons.length) {
-                          return IconButton(
-                            icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
-                            onPressed: () {
-                              if (beacons.isNotEmpty) {
-                                Beacon last = beacons.last;
-                                if (last.location == null || last.controller.text.trim().isEmpty) {
-                                  _showMsg("P${beacons.length} chưa hoàn thành!");
-                                  return;
-                                }
-                              }
-
-                              setState(() {
-                                String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
-
-                                if (beacons.length == 3) {
-                                  // --- LOGIC MỚI HYBRID: TRỌNG TÀI + BEST FIT ---
-                                  LatLng? bestK = _internalCalculateBestFit();
-
-                                  int countM = beacons.where((b) => b.unit == 'm').length;
-                                  int countKm = beacons.where((b) => b.unit == 'km').length;
-                                  int countMi = beacons.where((b) => b.unit == 'mi').length;
-                                  int countFt = beacons.where((b) => b.unit == 'ft').length;
-
-                                  // Điều kiện kích hoạt Trọng Tài (M-KM hoặc MI-FT)
-                                  bool isRefereeMode = (countM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
-                                  LatLng? finalPoint;
-
-                                  if (isRefereeMode) {
-                                      String pairUnit = (countM == 2) ? 'm' : 'mi';
-                                      var pair = beacons.where((b) => b.unit == pairUnit).toList();
-                                      var referee = beacons.firstWhere((b) => b.unit != pairUnit);
-                                      
-                                      if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
-                                           var roots = _calculateTwoCircleIntersectionPrecise(
-                                              pair[0].location!, _getRadiusInMeters(pair[0]), 
-                                              pair[1].location!, _getRadiusInMeters(pair[1])
-                                           );
-                                           
-                                           if (roots.length == 2) {
-                                               double rRef = _getRadiusInMeters(referee);
-                                               
-                                               double distRefToK1 = _haversineDistance(referee.location!, roots[0]);
-                                               double errorRadius1 = (distRefToK1 - rRef).abs();
-                                               double errorFit1 = bestK != null ? _haversineDistance(bestK, roots[0]) : 0;
-                                               double totalScore1 = errorRadius1 + errorFit1;
-
-                                               double distRefToK2 = _haversineDistance(referee.location!, roots[1]);
-                                               double errorRadius2 = (distRefToK2 - rRef).abs();
-                                               double errorFit2 = bestK != null ? _haversineDistance(bestK, roots[1]) : 0;
-                                               double totalScore2 = errorRadius2 + errorFit2;
-
-                                               finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
-                                           }
-                                      }
-                                  }
-
-                                  if (finalPoint == null && bestK != null) {
-                                     finalPoint = bestK;
-                                  }
-
-                                  if (finalPoint != null) {
-                                      int worstIndex = -1;
-                                      double maxDist = -1;
-                                      for (int k = 0; k < beacons.length; k++) {
-                                        if (beacons[k].location != null) {
-                                          double d = _haversineDistance(beacons[k].location!, finalPoint);
-                                          if (d > maxDist) { maxDist = d; worstIndex = k; }
-                                        }
-                                      }
-
-                                      if (worstIndex != -1) {
-                                        beacons[worstIndex].dispose();
-                                        beacons.removeAt(worstIndex);
-                                      }
-
-                                      beacons.add(Beacon(location: finalPoint, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
-                                      
-                                      selectedIndex = beacons.length - 1;
-                                      targetPoints.clear();
-                                      isMockingTarget = false;
-                                      
-                                      _setMock(finalPoint.latitude, finalPoint.longitude);
-                                      _mapController.move(finalPoint, 17);
-                                      _requestFocus(beacons.length - 1); 
-                                      return; 
-                                  }
-                                }
-                                
-                                // --- LOGIC CŨ CHO < 3 ĐIỂM ---
-                                LatLng? finalPos; 
-                                bool autoPlaced = false;
-
-                                if (beacons.length >= 2) {
-                                  var b1 = beacons[0];
-                                  var b2 = beacons[1];
-                                  if (b1.location != null && b1.controller.text.isNotEmpty &&
-                                      b2.location != null && b2.controller.text.isNotEmpty) {
-                                      try {
-                                        double r1 = _getRadiusInMeters(b1);
-                                        double r2 = _getRadiusInMeters(b2);
-                                        List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
-                                        if (intersections.isNotEmpty) {
-                                          finalPos = intersections[0]; 
-                                          autoPlaced = true;
-                                        }
-                                      } catch (e) {}
-                                  }
-                                }
-                                
-                                if (!autoPlaced) {
-                                  int newIndex = beacons.length; 
-                                  if (newIndex > 0) {
-                                     Beacon prevBeacon = beacons[newIndex - 1];
-                                     if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                                             double? r = double.tryParse(prevBeacon.controller.text);
-                                             if (r != null && r > 0) {
-                                                  double distMeters = _getRadiusInMeters(prevBeacon);
-                                                  LatLng center = prevBeacon.location!;
-                                                  double bearing = _calculateOptimalBearing(center, newIndex);
-                                                  finalPos = _calculatePointFromBearing(center, distMeters, bearing);
-                                             }
-                                     }
-                                  }
-                                }
-
-                                if (finalPos != null) {
-                                  beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
-                                  selectedIndex = beacons.length - 1;
-                                  targetPoints.clear();
-                                  isMockingTarget = false;
-                                  _setMock(finalPos!.latitude, finalPos!.longitude);
-                                  _mapController.move(finalPos!, 17);
-                                } else {
-                                  beacons.add(Beacon(color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
-                                }
-                                _requestFocus(beacons.length - 1); 
-                              });
-                            }
-                          );
-                        }
-                        return Container(
-                          width: 80, 
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Column(
-                            children: [
-                              GestureDetector(
-                                onTap: () => _smartSetLocation(i),
-                                onLongPress: () => _confirmDeleteBeacon(i), 
-                                child: Container(
-                                  width: double.infinity,
-                                  alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? beacons[i].color : Colors.grey.shade400),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text("P${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    child: Row(
+                      children: [
+                        // Danh sách các điểm P
+                        Expanded(
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: beacons.length,
+                            itemBuilder: (ctx, i) {
+                              return Container(
+                                width: 80, 
+                                margin: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Column(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _smartSetLocation(i),
+                                      onLongPress: () => _confirmDeleteBeacon(i), 
+                                      child: Container(
+                                        width: double.infinity,
+                                        alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? beacons[i].color : Colors.grey.shade400),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text("P${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                      ),
+                                    ),
+                                    TextField(
+                                      controller: beacons[i].controller, 
+                                      focusNode: beacons[i].focusNode, 
+                                      keyboardType: TextInputType.number, 
+                                      textAlign: TextAlign.center, 
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                      onTap: () {
+                                        setState(() {});
+                                      },
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                        suffixIcon: Padding(
+                                          padding: const EdgeInsets.all(4.0),
+                                          child: Text(beacons[i].unit, style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 11)),
+                                        ),
+                                        suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+                                      )
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              TextField(
-                                controller: beacons[i].controller, 
-                                focusNode: beacons[i].focusNode, 
-                                keyboardType: TextInputType.number, 
-                                textAlign: TextAlign.center, 
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                                onTap: () {
-                                  setState(() {});
-                                },
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                  suffixIcon: Padding(
-                                    padding: const EdgeInsets.all(4.0),
-                                    child: Text(beacons[i].unit, style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 11)),
-                                  ),
-                                  suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-                                )
-                              ),
-                            ],
+                              );
+                            },
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // --- HIỂN THỊ TỌA ĐỘ VÀ ĐỊA CHỈ THAY VÌ CẢNH BÁO ---
                   GestureDetector(
                     onLongPress: () { Clipboard.setData(ClipboardData(text: "$coordDisplay\n$addressDisplay")); _showMsg("Đã copy!"); },
                     child: Column(
@@ -1306,38 +1325,138 @@ class _MockAppState extends State<MockApp> {
                     ),
                   ),
                   const Divider(height: 10),
+                  
+                  // HÀNG GỘP ĐƠN VỊ & CÁC NÚT (TÌM KIẾM, OVERLAY)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 2.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Cụm 1: Các nút đơn vị (màu xanh dương)
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: availableUnits.map((unit) => Padding(
+                                padding: const EdgeInsets.only(right: 6.0),
+                                child: ChoiceChip(
+                                  showCheckmark: false, // Ẩn dấu tick
+                                  label: Text(unit, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: activeUnitForChip == unit ? Colors.white : Colors.black87)), 
+                                  selected: activeUnitForChip == unit, 
+                                  selectedColor: Colors.blue, // Chuyển sang xanh thay vì tím
+                                  backgroundColor: Colors.grey.shade200,
+                                  visualDensity: VisualDensity.compact,
+                                  onSelected: (val) {
+                                    if (val) _setUnitForSelectedBeacon(unit);
+                                  },
+                                ),
+                              )).toList(),
+                            ),
+                          ),
+                        ),
+                        
+                        // Cụm 2: Nút nổi và nút tìm kiếm (bên phải)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            GestureDetector(
+                              onLongPress: _pickTargetApp, 
+                              child: IconButton(
+                                icon: Icon(Icons.layers, color: targetAppPackage != null ? Colors.blueAccent : Colors.grey, size: 26), 
+                                onPressed: _triggerOverlay, 
+                                tooltip: "Bật/Tắt Nút Nổi",
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            IconButton(
+                              icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue, size: 26),
+                              onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+
+                  // HÀNG 7 NÚT (SẼ KHÔNG BỊ CO GIÃN KHI ẨN DO DÙNG MAINTAINSIZE: TRUE)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.red), onPressed: () {
-                        setState(() { 
-                          beacons = [Beacon(color: Colors.blue, unit: 'km')]; 
-                          targetPoints.clear(); 
-                          searchMarker = null; 
-                          coordDisplay = "0.000000, 0.000000"; 
-                          addressDisplay = "Chưa có vị trí"; 
-                          addressColor = Colors.grey; 
-                          selectedIndex = 0; 
-                        });
-                        _stopMock();
-                      }),
-                      if (targetPoints.isNotEmpty || selectedIndex != null) IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
-                      if (targetPoints.isNotEmpty) IconButton(icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28), onPressed: _assignResultToNextP),
-                      
-                      if (selectedIndex != null) IconButton(icon: const Icon(Icons.refresh, color: Colors.orange, size: 28), onPressed: _resetCurrentBeacon),
-                      
+                      // 1. Nút (+) thêm P - Luôn hiển thị
                       IconButton(
-                        onPressed: (targetPoints.isEmpty && selectedIndex == null) ? null : (isAnyMocking ? _stopMock : () { 
-                           if (selectedIndex != null && beacons[selectedIndex!].location != null) {
-                             _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
-                           } else if (targetPoints.isNotEmpty) {
-                             _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
-                           }
-                        }),
-                        icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
+                        icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
+                        onPressed: _addNewBeacon
+                      ),
+
+                      // 2. Nút Xóa tất cả (thùng rác)
+                      Visibility(
+                        visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(
+                          icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 30), 
+                          onPressed: () {
+                            setState(() { 
+                              beacons = []; 
+                              targetPoints.clear(); 
+                              searchMarker = null; 
+                              coordDisplay = "0.000000, 0.000000"; 
+                              addressDisplay = "Chưa có vị trí"; 
+                              addressColor = Colors.grey; 
+                              selectedIndex = null; 
+                            });
+                            _stopMock();
+                            _zoomToFitAll();
+                          }
+                        ),
+                      ),
+
+                      // 3. Nút Gán P1
+                      Visibility(
+                        visible: targetPoints.isNotEmpty || selectedIndex != null,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
                       ),
                       
-                      if (targetPoints.isNotEmpty || selectedIndex != null) IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
+                      // 4. Nút Gán P tiếp theo
+                      Visibility(
+                        visible: targetPoints.isNotEmpty,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28), onPressed: _assignResultToNextP),
+                      ),
+                      
+                      // 5. Nút Refresh
+                      Visibility(
+                        visible: selectedIndex != null,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(icon: const Icon(Icons.refresh, color: Colors.orange, size: 28), onPressed: _resetCurrentBeacon),
+                      ),
+                      
+                      // 6. Nút Play/Stop
+                      Visibility(
+                        visible: targetPoints.isNotEmpty || selectedIndex != null,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(
+                          onPressed: isAnyMocking ? _stopMock : () { 
+                             if (selectedIndex != null && beacons[selectedIndex!].location != null) {
+                               _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
+                             } else if (targetPoints.isNotEmpty) {
+                               _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
+                             }
+                          },
+                          icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
+                        ),
+                      ),
+                      
+                      // 7. Nút Save
+                      Visibility(
+                        visible: targetPoints.isNotEmpty || selectedIndex != null,
+                        maintainSize: true, maintainAnimation: true, maintainState: true,
+                        child: IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
+                      ),
                     ],
                   ),
                 ],
@@ -1351,7 +1470,6 @@ class _MockAppState extends State<MockApp> {
                     options: MapOptions(
                       initialCenter: const LatLng(10.7626, 106.6601),
                       initialZoom: 13,
-                      // --- CÁC THAY ĐỔI ĐÃ THÊM: GIỚI HẠN ZOOM & KÉO ---
                       minZoom: 3.0, 
                       maxZoom: 18.0,
                       cameraConstraint: CameraConstraint.contain(
@@ -1360,7 +1478,6 @@ class _MockAppState extends State<MockApp> {
                           const LatLng(90, 180),
                         ),
                       ),
-                      // --------------------------------------------------
                       onTap: (_, latlng) {
                         if (selectedIndex != null && !isMockingTarget) {
                           setState(() { beacons[selectedIndex!].location = latlng; targetPoints.clear(); });
@@ -1400,7 +1517,6 @@ class _MockAppState extends State<MockApp> {
                     ),
                     children: [
                       TileLayer(
-                        // --- ĐỔI SERVER ĐỂ TRÁNH LỖI ACCESS BLOCKED (403) ---
                         urlTemplate: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
                         userAgentPackageName: 'com.khoa.fakegpstracetarget',
                         tileProvider: CachedTileProvider(store: _mapCacheStore),
