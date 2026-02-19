@@ -59,7 +59,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   bool _isReturning = false; 
   Color _bgColor = Colors.blueAccent;
   IconData _icon = Icons.login; 
-  bool _isLoading = false;
 
   @override
   void initState() {
@@ -70,7 +69,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Future<void> _loadTargetFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.reload(); 
+      await prefs.reload(); // Cập nhật lại bộ nhớ mới nhất
       setState(() {
         _targetPackage = prefs.getString('target_app_package');
       });
@@ -112,38 +111,42 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(100),
-            onTap: () {
-              if (_isLoading) return;
+            
+            // --- 1. NHẤN 1 LẦN: Đổi qua lại giữa 2 App SIÊU TỐC ---
+            onTap: () async {
+              // Cập nhật giao diện lập tức để phản hồi nhanh
               setState(() {
-                _isLoading = true;
                 _bgColor = Colors.orange;
               });
 
-              Future.delayed(const Duration(milliseconds: 50), () async {
-                if (_targetPackage == null) await _loadTargetFromDisk();
-                
-                if (_targetPackage != null) {
-                  if (_isReturning) {
-                    await _launchApp(_myPackage);
-                    if (mounted) setState(() {
-                      _isReturning = false;
-                      _icon = Icons.login;
-                      _bgColor = Colors.blueAccent;
-                    });
-                  } else {
-                    await _launchApp(_targetPackage!);
-                    if (mounted) setState(() {
-                      _isReturning = true;
-                      _icon = Icons.undo;
-                      _bgColor = Colors.green;
-                    });
-                  }
+              // LUÔN LUÔN đọc lại dữ liệu từ Disk mỗi khi bấm
+              // Để đảm bảo nhận được tên App mới nếu khách hàng vừa đổi
+              await _loadTargetFromDisk();
+              
+              if (_targetPackage != null) {
+                if (_isReturning) {
+                  await _launchApp(_myPackage);
+                  if (mounted) setState(() {
+                    _isReturning = false;
+                    _icon = Icons.login;
+                    _bgColor = Colors.blueAccent;
+                  });
                 } else {
-                    if (mounted) setState(() => _bgColor = Colors.grey);
+                  await _launchApp(_targetPackage!);
+                  if (mounted) setState(() {
+                    _isReturning = true;
+                    _icon = Icons.undo;
+                    _bgColor = Colors.green;
+                  });
                 }
-                if (mounted) setState(() => _isLoading = false);
-              });
+              } else {
+                  if (mounted) setState(() => _bgColor = Colors.grey);
+              }
             },
+
+            // ĐÃ XÓA onDoubleTap ĐỂ NÚT BẤM NHẬN LỆNH NHANH NHẤT VÀ KHÔNG BỊ LỖI KHI BẤM LIÊN TỤC
+
+            // --- 2. NHẤN GIỮ: TẮT CỬA SỔ NỔI ---
             onLongPress: () async {
               if (mounted) {
                 setState(() {
@@ -160,12 +163,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                 });
               }
             },
-            child: _isLoading 
-              ? const Padding(
-                  padding: EdgeInsets.all(20.0),
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-                )
-              : Icon(_icon, color: Colors.white, size: 32),
+
+            // Loại bỏ hoàn toàn hiệu ứng loading, icon luôn hiện diện
+            child: Icon(_icon, color: Colors.white, size: 32),
           ),
         ),
       ),
@@ -256,7 +256,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   // --- BIẾN QUẢN LÝ THU PHÍ & CÔNG TẮC ---
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 50;    // 50 lượt dùng thử
+  final int maxTrial = 50;
   bool allowTrialFromServer = true; 
   String? deviceId;
 
@@ -305,7 +305,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     deviceId = await androidIdPlugin.getId();
     if (deviceId == null) return;
 
-    // 1. ĐỌC CÔNG TẮC TỪ FIREBASE (Tách riêng try-catch)
     try {
       final adminDoc = await FirebaseFirestore.instance.collection('trace_target').doc('config').get();
       if (adminDoc.exists) {
@@ -319,7 +318,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       print("Lỗi đọc công tắc trace_target: $e");
     }
 
-    // 2. ĐỌC/GHI DỮ LIỆU THIẾT BỊ (Tách riêng, đảm bảo luôn chạy dù bước 1 có lỗi)
     try {
       final doc = await FirebaseFirestore.instance.collection('devices').doc(deviceId!).get();
       if (doc.exists) {
@@ -358,7 +356,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         title: const Text("Mở khóa bản PRO vĩnh viễn", textAlign: TextAlign.center),
         content: SizedBox(
           width: double.maxFinite,
-          child: SingleChildScrollView( // FIX TRÀN VIỀN
+          child: SingleChildScrollView( 
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -584,9 +582,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   ),
                   title: Text(app.name ?? "Unknown", maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text(app.packageName ?? "", maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
-                  onTap: () {
+                  onTap: () async {
                     setState(() => targetAppPackage = app.packageName);
-                    _saveTargetApp(app.packageName!);
+                    await _saveTargetApp(app.packageName!);
                     Navigator.pop(ctx);
                     _showMsg("Đã liên kết: ${app.name}");
                     _showInvincibleOverlay(); 
@@ -639,7 +637,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (!isPro) {
       trialCount++;
       if (deviceId != null) {
-         // !!! FIX LỖI ÉP ĐỒNG BỘ LÊN FIREBASE MỖI KHI DÙNG
          await FirebaseFirestore.instance.collection('devices').doc(deviceId!).set({
            'trialCount': trialCount,
            'lastUsed': FieldValue.serverTimestamp(),
@@ -1572,7 +1569,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // ===============================================
-                            // ĐÃ FIX: SỬA THÀNH INKWELL ĐỂ KHÔNG BỊ LỖI CHẶN NHẤN GIỮ
+                            // ĐÃ FIX: SỬA THÀNH INKWELL VÀ CHẠY MƯỢT
                             // ===============================================
                             InkWell(
                               onLongPress: _pickTargetApp, 
@@ -1603,7 +1600,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // NÚT THÊM (+)
+                      // NÚT THÊM (+) ĐÃ ĐƯỢC CHẶN NẾU HẾT LƯỢT HOẶC CÔNG TẮC BỊ TẮT
                       IconButton(
                         icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
                         onPressed: _addNewBeacon 
