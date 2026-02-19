@@ -24,6 +24,11 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:installed_apps/app_info.dart';
 
+// --- FIREBASE VÀ THU PHÍ (THÊM MỚI) ---
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:android_id/android_id.dart';
+
 // ==========================================
 // PHẦN 1: ENTRY POINT CHO OVERLAY (CỬA SỔ NỔI)
 // ==========================================
@@ -172,6 +177,10 @@ late final CacheStore _mapCacheStore;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // KHỞI TẠO FIREBASE CHO HỆ THỐNG THU PHÍ
+  await Firebase.initializeApp();
+
   try {
     final dir = await getTemporaryDirectory();
     _mapCacheStore = FileCacheStore('${dir.path}/map_tiles');
@@ -239,6 +248,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _mockTimer;
 
+  // --- BIẾN QUẢN LÝ THU PHÍ ---
+  bool isPro = false;
+  int trialCount = 0;
+  final int maxTrial = 5; 
+  String? deviceId;
+
   List<Beacon> beacons = [];
   List<SavedTarget> savedTargets = [];
   
@@ -269,10 +284,86 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); 
+    _checkDeviceStatus(); // Kiểm tra thiết bị trên Firebase khi mở app
     _initLocation();
     _loadData(); 
     _requestOverlayPermission();
   }
+
+  // ======================================================
+  // HỆ THỐNG THU PHÍ: KIỂM TRA MÁY & THANH TOÁN
+  // ======================================================
+
+  Future<void> _checkDeviceStatus() async {
+    try {
+      const androidIdPlugin = AndroidId();
+      deviceId = await androidIdPlugin.getId();
+      
+      if (deviceId == null) return;
+
+      final doc = await FirebaseFirestore.instance.collection('devices').doc(deviceId).get();
+      
+      if (doc.exists) {
+        setState(() {
+          isPro = doc.data()?['isPro'] ?? false;
+          trialCount = doc.data()?['trialCount'] ?? 0;
+        });
+      } else {
+        await FirebaseFirestore.instance.collection('devices').doc(deviceId).set({
+          'trialCount': 0,
+          'isPro': false,
+          'lastUsed': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      print("Lỗi kết nối Firebase: $e");
+    }
+  }
+
+  void _showPaymentDialog() {
+    // TẠO MÃ QR THANH TOÁN (THAY ĐỔI THÔNG TIN CỦA BẠN Ở ĐÂY)
+    String bankId = "MB"; // Tên viết tắt ngân hàng (VD: VCB, BIDV, TCB, MB)
+    String accountNo = "0123456789"; // Số tài khoản của bạn
+    String amount = "50000"; // Giá bán
+    String description = "PRO $deviceId"; // Cú pháp nội dung chuyển khoản tự động
+    
+    String encodedDesc = Uri.encodeComponent(description);
+    String qrUrl = "https://img.vietqr.io/image/$bankId-$accountNo-compact.png?amount=$amount&addInfo=$encodedDesc";
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Mở khóa bản PRO vĩnh viễn", textAlign: TextAlign.center),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Bạn đã hết 5 lượt dùng thử Mock Location.\nQuét mã QR dưới đây để nâng cấp:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 15),
+            Image.network(qrUrl, height: 200, width: 200),
+            const SizedBox(height: 10),
+            Text("Giá: 50.000 VNĐ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade700)),
+            const SizedBox(height: 10),
+            SelectableText("ID Máy: $deviceId", style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+            const Text("(Vui lòng giữ nguyên nội dung chuyển khoản)", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Để sau")),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _checkDeviceStatus(); // Load lại từ Firebase xem bạn đã bật Pro chưa
+              _showMsg("Đang cập nhật trạng thái PRO...");
+            }, 
+            child: const Text("Đã thanh toán")
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ======================================================
 
   Future<void> _requestOverlayPermission() async {
     bool status = await FlutterOverlayWindow.isPermissionGranted();
@@ -442,6 +533,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _triggerOverlay() async {
+    // ÉP MUA PRO: KHÓA NÚT NỔI VỚI NGƯỜI DÙNG FREE
+    if (!isPro) {
+      _showMsg("Cửa sổ nổi là tính năng dành riêng cho bản PRO!");
+      _showPaymentDialog();
+      return;
+    }
+
     if (targetAppPackage == null) {
       _showMsg("Chưa chọn App! Vui lòng chọn App trước.");
       _pickTargetApp();
@@ -472,6 +570,22 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
+    // BƯỚC 1: KIỂM TRA QUYỀN TRUY CẬP (THU PHÍ)
+    if (!isPro && trialCount >= maxTrial) {
+      _showPaymentDialog(); // Hiện bảng đòi tiền
+      return; // CHẶN LẠI KHÔNG CHO CHẠY MOCK
+    }
+
+    // BƯỚC 2: CỘNG LƯỢT NẾU CHƯA PRO
+    if (!isPro) {
+      trialCount++;
+      if (deviceId != null) {
+         FirebaseFirestore.instance.collection('devices').doc(deviceId).update({'trialCount': trialCount});
+      }
+      setState(() {}); 
+    }
+
+    // BƯỚC 3: CHẠY LOGIC MOCK CŨ
     _mockTimer?.cancel();
     void pushMock() {
       try { platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); } catch (e) { print("Lỗi Mock: $e"); }
@@ -480,7 +594,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _mockTimer = Timer.periodic(const Duration(seconds: 1), (timer) { pushMock(); });
     
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
-      _showInvincibleOverlay(); 
+      // Chỉ bật nếu là Pro (nếu lọt xuống đây thì mặc định là đang trial hoặc đã Pro)
+      if (isPro) _showInvincibleOverlay(); 
     }
     
     _updateCurrentInfo(LatLng(lat, lng));
@@ -506,7 +621,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   // ======================================================
-  // PHẦN THUẬT TOÁN TÍNH TOÁN
+  // PHẦN THUẬT TOÁN TÍNH TOÁN (Giữ nguyên)
   // ======================================================
 
   double _toRadians(double degree) => degree * pi / 180.0;
@@ -567,11 +682,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return [k1, k2];
   }
 
-  // CẬP NHẬT 1: Bộ tối ưu hóa mở rộng 8 hướng thay vì 4 hướng và stepSize nhỏ hơn để chui lọt điểm 0m
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
     LatLng currentPos = startPoint;
     double stepSize = 0.001; 
-    double minStep = 0.00000001; // Giảm bước chạy xuống mức siêu nhỏ (tầm centimet)
+    double minStep = 0.00000001; 
     int maxIterations = 5000; 
     int iter = 0;
 
@@ -586,7 +700,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         LatLng(currentPos.latitude - stepSize, currentPos.longitude),
         LatLng(currentPos.latitude, currentPos.longitude + stepSize),
         LatLng(currentPos.latitude, currentPos.longitude - stepSize),
-        // Thêm 4 hướng chéo để tránh kẹt ở nếp gấp địa hình lỗi
         LatLng(currentPos.latitude + stepSize, currentPos.longitude + stepSize),
         LatLng(currentPos.latitude - stepSize, currentPos.longitude - stepSize),
         LatLng(currentPos.latitude + stepSize, currentPos.longitude - stepSize),
@@ -611,32 +724,25 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return currentPos;
   }
 
-  // CẬP NHẬT 2: Trọng lượng lực hút (Gravity Weighting)
   double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     double totalError = 0;
     for (var b in beacons) {
       if (b.location == null) continue;
       double d = _haversineDistance(p, b.location!);
       double r = _getRadiusInMeters(b);
-      if (r <= 0) continue; // Bỏ qua nếu r = 0 để tránh lỗi
-      
-      // Bán kính r càng NHỎ (điểm P càng GẦN), weight càng LỚN
-      // Điều này ép thuật toán coi trọng các vòng tròn nhỏ, bỏ qua sai số của vòng tròn to ở xa
+      if (r <= 0) continue; 
       double weight = 1000.0 / r; 
-      
       totalError += weight * pow(d - r, 2); 
     }
     return totalError;
   }
 
-  // CẬP NHẬT 3: Quét mọi khả năng giao điểm thay vì chỉ P1-P2
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
 
       List<LatLng> allRoots = [];
       
-      // Sinh toàn bộ giao điểm của tất cả các cặp có thể (P1-P2, P2-P3, P1-P3...)
       for (int i = 0; i < validBeacons.length - 1; i++) {
          for (int j = i + 1; j < validBeacons.length; j++) {
              double r1 = _getRadiusInMeters(validBeacons[i]);
@@ -649,12 +755,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       LatLng bestStartNode;
       
       if (allRoots.isEmpty) {
-        // Không có đường tròn nào cắt nhau
         double sLat = 0, sLng = 0;
         for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
         bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
       } else {
-        // Tìm giao điểm nào mà khi đặt K vào đó, "tổng sai số có trọng lượng" là thấp nhất
         double minE = double.infinity;
         bestStartNode = allRoots[0];
         for (var root in allRoots) {
@@ -1608,4 +1712,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+}//

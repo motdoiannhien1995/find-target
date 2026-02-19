@@ -33,6 +33,10 @@ dependencies:
   flutter_overlay_window: ^0.5.0
   installed_apps: ^1.0.1
 
+  firebase_core: ^2.24.2
+  cloud_firestore: ^4.14.0
+  android_id: ^0.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
