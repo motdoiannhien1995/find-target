@@ -1,6 +1,8 @@
 package com.khoa.trilaterat
 
+import android.app.AppOpsManager
 import android.content.Context
+import android.content.Intent
 import android.location.Location
 import android.location.LocationManager
 import android.os.Build
@@ -8,6 +10,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.widget.Toast
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
@@ -58,8 +61,35 @@ class MainActivity: FlutterActivity() {
                     stopMock()
                     result.success(null)
                 }
+                // --- ĐOẠN CODE MỚI THÊM VÀO DƯỚI ĐÂY ---
+                "checkMockPermission" -> {
+                    result.success(isMockLocationEnabled())
+                }
+                "openDeveloperOptions" -> {
+                    try {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("UNAVAILABLE", "Không thể mở Developer Options", null)
+                    }
+                }
+                // ----------------------------------------
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    // Hàm kiểm tra quyền Mock Location từ hệ thống Android
+    private fun isMockLocationEnabled(): Boolean {
+        return try {
+            val appOpsManager = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOpsManager.unsafeCheckOp(AppOpsManager.OPSTR_MOCK_LOCATION, android.os.Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
+            } else {
+                appOpsManager.checkOp(AppOpsManager.OPSTR_MOCK_LOCATION, android.os.Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 

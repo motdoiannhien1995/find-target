@@ -269,6 +269,54 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _initLocation();
     _loadData(); 
     _requestOverlayPermission();
+    _checkMockPermission(); 
+  }
+
+  Future<void> _checkMockPermission() async {
+    try {
+      final bool isGranted = await platform.invokeMethod('checkMockPermission');
+      if (!isGranted) {
+        _showMockPermissionDialog();
+      }
+    } catch (e) {
+      print("Chưa có native method checkMockPermission: $e");
+    }
+  }
+
+  void _showMockPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Cấp Quyền Mô Phỏng Vị Trí", textAlign: TextAlign.center),
+        content: const Text(
+          "Ứng dụng cần quyền 'Ứng dụng vị trí mô phỏng' (Mock Location) để có thể hoạt động chính xác.\n\n"
+          "Vui lòng vào Tùy chọn nhà phát triển (Developer Options) -> Chọn ứng dụng vị trí mô phỏng -> Chọn app này.",
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Để sau"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await platform.invokeMethod('openDeveloperOptions');
+              } catch (e) {
+                _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
+              }
+            },
+            child: const Text("Tới Cài Đặt", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _checkStatus() async {
@@ -1320,7 +1368,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             if (allUnder100m) {
                 worstIndex = 0;
             } else {
-                // Sửa logic xóa điểm: Xóa điểm có sai số (khoảng cách thực tế - bán kính nhập) lớn nhất
                 double maxError = -1;
                 for (int k = 0; k < beacons.length; k++) {
                   if (beacons[k].location != null && beacons[k].controller.text.isNotEmpty) {
@@ -1643,11 +1690,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         ),
                       ),
                       onTap: (_, latlng) {
-                        if (selectedIndex != null && !isMockingTarget) {
-                          setState(() { beacons[selectedIndex!].location = latlng; targetPoints.clear(); });
-                          _setMock(latlng.latitude, latlng.longitude);
-                          _requestFocus(selectedIndex!); 
-                        }
+                        // CHỈNH SỬA Ở ĐÂY: Xóa tính năng đổi tọa độ khi chạm nhẹ.
+                        // Bây giờ chạm nhẹ vào bản đồ chỉ có tác dụng ẩn bàn phím (nếu đang bật)
+                        FocusManager.instance.primaryFocus?.unfocus(); 
                       },
                       onLongPress: (_, latlng) {
                         if (_isActionBlocked()) {
@@ -1655,28 +1700,39 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           return;
                         }
 
-                        int targetIndex = -1;
-                        String unitToUse = 'km'; 
-                        if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
-
+                        int emptyIndex = -1;
+                        
+                        // Bước 1: Tìm xem có điểm P nào đang trống không (ví dụ: vừa bấm nút +)
                         for (int i = 0; i < beacons.length; i++) {
                           if (beacons[i].location == null) {
-                            targetIndex = i;
+                            emptyIndex = i;
                             break;
                           }
                         }
 
+                        // KHỞI TẠO GIÁ TRỊ MẶC ĐỊNH LÀ 0 ĐỂ FIX LỖI "Non-nullable variable"
+                        int targetIndex = 0;
+
                         setState(() {
-                          if (targetIndex != -1) {
-                            beacons[targetIndex].location = latlng;
+                          if (emptyIndex != -1) {
+                            // Ưu tiên 1: Gán tọa độ cho điểm P đang trống
+                            beacons[emptyIndex].location = latlng;
+                            targetIndex = emptyIndex;
                             selectedIndex = targetIndex;
+                            isMockingTarget = false;
+                          } else if (selectedIndex != null && !isMockingTarget) {
+                            // Ưu tiên 2: CHỈNH SỬA Ở ĐÂY - Nếu đang chọn 1 điểm P, BẤM GIỮ sẽ di chuyển điểm đó
+                            beacons[selectedIndex!].location = latlng;
+                            targetIndex = selectedIndex!;
                           } else {
+                            // Ưu tiên 3: Nếu chưa có gì trên bản đồ, tạo điểm P mới luôn
+                            String unitToUse = beacons.isNotEmpty ? beacons.last.unit : 'km';
                             beacons.add(Beacon(location: latlng, color: colorPalette[beacons.length % colorPalette.length], unit: unitToUse));
                             targetIndex = beacons.length - 1;
                             selectedIndex = targetIndex;
+                            isMockingTarget = false;
                           }
                           targetPoints.clear();
-                          isMockingTarget = false;
                         });
 
                         _requestFocus(targetIndex);
