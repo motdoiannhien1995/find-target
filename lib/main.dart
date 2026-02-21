@@ -29,6 +29,8 @@ import 'package:android_id/android_id.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
 
+import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
+
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -212,6 +214,15 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final TextEditingController _searchCtrl = TextEditingController();
   final ScreenshotController _screenshotController = ScreenshotController(); 
 
+  final GlobalKey _addBeaconKey = GlobalKey();
+  final GlobalKey _linkAppKey = GlobalKey(); 
+  final GlobalKey _helpKey = GlobalKey(); 
+  
+  late TutorialCoachMark tutorialCoachMark;
+  List<TargetFocus> targets = [];
+  bool _isTutorialShowing = false;
+  bool _isMockDialogShowing = false; 
+
   bool isPro = false;
   int trialCount = 0;
   final int maxTrial = 50;
@@ -256,55 +267,203 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _initLocation();
-      await _checkMockPermission(); 
+      bool isGranted = await platform.invokeMethod('checkMockPermission');
+      if (!isGranted) {
+        _showMockPermissionDialog();
+      } else {
+        _checkAndShowTutorial();
+      }
     });
   }
 
-  Future<void> _checkMockPermission() async {
-    try {
-      final bool isGranted = await platform.invokeMethod('checkMockPermission');
-      if (!isGranted) {
-        _showMockPermissionDialog();
-      }
-    } catch (e) {
-      print("Chưa có native method checkMockPermission: $e");
-    }
-  }
-
-  void _showMockPermissionDialog() {
+  void _showInstructionBoard() {
     showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text("Cấp Quyền Mô Phỏng Vị Trí", textAlign: TextAlign.center),
-        content: const Text(
-          "Ứng dụng cần quyền 'Ứng dụng vị trí mô phỏng' (Mock Location) để có thể hoạt động chính xác.\n\n"
-          "Vui lòng vào Tùy chọn nhà phát triển (Developer Options) -> Chọn ứng dụng vị trí mô phỏng -> Chọn app này.",
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14),
+        title: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.menu_book, color: Colors.blue),
+            SizedBox(width: 8),
+            Text("HƯỚNG DẪN", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("BƯỚC 1: Chọn App Mục Tiêu", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+              Text("- Nhấn giữ vào biểu tượng 'Layer' (lớp lưới) để chọn app mà bạn muốn đo (ví dụ: Heesay). Nút Cửa sổ nổi sẽ tự động bật lên màn hình."),
+              SizedBox(height: 10),
+              Text("BƯỚC 2: Thêm Điểm Mô Phỏng", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+              Text("- Bấm dấu [+] màu xanh lá để thêm điểm P1.\n- Nhập khoảng cách đo được từ app mục tiêu vào ô của P1."),
+              SizedBox(height: 10),
+              Text("BƯỚC 3: Đo Tọa Độ Nâng Cao", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+              Text("- Bấm tiếp dấu [+] để thêm P2, P3 và nhập khoảng cách tương tự.\n- Khi có từ 2-3 điểm, app sẽ tự động vẽ vòng tròn và tìm ra giao điểm chính xác của mục tiêu."),
+              SizedBox(height: 10),
+              Text("BƯỚC 4: Chuyển Nhanh", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+              Text("- Sử dụng Cửa sổ nổi (Nút tròn trên màn hình) để chuyển đổi qua lại siêu tốc giữa App này và App mục tiêu."),
+            ],
+          ),
         ),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Để sau"),
-          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                await platform.invokeMethod('openDeveloperOptions');
-              } catch (e) {
-                _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
-              }
-            },
-            child: const Text("Tới Cài Đặt", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            onPressed: () => Navigator.pop(ctx), 
+            child: const Text("TÔI ĐÃ HIỂU", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+          )
+        ],
+      )
+    );
+  }
+
+  Future<void> _checkAndShowTutorial() async {
+    bool isGranted = await platform.invokeMethod('checkMockPermission');
+    if (!isGranted || _isTutorialShowing) return;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool isFirstTime = prefs.getBool('is_first_time_flow_v10') ?? true;
+
+    if (isFirstTime) {
+      _isTutorialShowing = true;
+      _initTargets();
+      _showTutorial();
+      await prefs.setBool('is_first_time_flow_v10', false); 
+    }
+  }
+
+  void _initTargets() {
+    targets = [
+      TargetFocus(
+        identify: "link_app_btn",
+        keyTarget: _linkAppKey,
+        alignSkip: Alignment.topRight,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (context, controller) => const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("BƯỚC 1: Liên kết ứng dụng", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
+                SizedBox(height: 10),
+                Text("Nhấn giữ (Long press) vào biểu tượng này để chọn app bạn muốn đo khoảng cách.", style: TextStyle(color: Colors.white, fontSize: 16)),
+              ],
+            ),
           ),
         ],
       ),
+      TargetFocus(
+        identify: "add_beacon_btn",
+        keyTarget: _addBeaconKey,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (context, controller) => const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("BƯỚC 2: Thêm điểm mô phỏng", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
+                SizedBox(height: 10),
+                Text("Bấm vào dấu cộng này để bắt đầu thêm các điểm P ra bản đồ nhé.", style: TextStyle(color: Colors.white, fontSize: 16)),
+              ],
+            ),
+          ),
+        ],
+      ),
+      TargetFocus(
+        identify: "help_btn",
+        keyTarget: _helpKey,
+        contents: [
+          TargetContent(
+            align: ContentAlign.bottom,
+            builder: (context, controller) => const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Bảng hướng dẫn chi tiết", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
+                SizedBox(height: 10),
+                Text("Bất cứ khi nào bạn quên cách dùng, hãy bấm vào đây để đọc bảng hướng dẫn nhé!", style: TextStyle(color: Colors.white, fontSize: 16)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  void _showTutorial() {
+    tutorialCoachMark = TutorialCoachMark(
+      targets: targets,
+      colorShadow: Colors.black,
+      opacityShadow: 0.85,
+      textSkip: "ĐÃ HIỂU",
+      paddingFocus: 10,
+      onFinish: () {
+        _isTutorialShowing = false;
+      },
+      onSkip: () {
+        _isTutorialShowing = false;
+        return true;
+      },
+    )..show(context: context);
+  }
+
+  void _showMockPermissionDialog() {
+    if (_isMockDialogShowing) return;
+    _isMockDialogShowing = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, 
+      builder: (ctx) => PopScope(
+        canPop: false, 
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text("Bắt Buộc Cấp Quyền", textAlign: TextAlign.center, style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          content: const Text(
+            "Bạn PHẢI chọn ứng dụng này trong mục 'Ứng dụng vị trí mô phỏng' (Mock Location) ở Tùy chọn nhà phát triển thì mới có thể sử dụng được app.\n\n"
+            "Vui lòng nhấn nút bên dưới để tới Cài đặt.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14),
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+              onPressed: () async {
+                try {
+                  await platform.invokeMethod('openDeveloperOptions');
+                } catch (e) {
+                  _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
+                }
+              },
+              child: const Text("Tới Cài Đặt Ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
     );
+  }
+
+  Future<void> _checkMockOnResume() async {
+    try {
+      bool isGranted = await platform.invokeMethod('checkMockPermission');
+      if (isGranted) {
+        if (_isMockDialogShowing) {
+          Navigator.of(context, rootNavigator: true).pop(); 
+          _isMockDialogShowing = false;
+          _showMsg("Đã cấp quyền thành công!");
+        }
+        _checkAndShowTutorial();
+      } else {
+        _stopMock();
+        _showMockPermissionDialog();
+      }
+    } catch (e) {}
   }
 
   Future<void> _checkStatus() async {
@@ -458,6 +617,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         FocusManager.instance.primaryFocus?.unfocus();
       }
     } else if (state == AppLifecycleState.resumed) {
+      _checkMockOnResume();
+
       if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
         Future.delayed(const Duration(milliseconds: 300), () {
           if (mounted) {
@@ -607,13 +768,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _pickTargetApp();
       return;
     }
+
     bool isActive = await FlutterOverlayWindow.isActive();
     if (isActive) {
       await FlutterOverlayWindow.closeOverlay();
       _showMsg("Đã tắt nút nổi");
     } else {
-      try { await FlutterOverlayWindow.closeOverlay(); } catch (e) {}
-      await Future.delayed(const Duration(milliseconds: 200));
       await _showInvincibleOverlay();
       _showMsg("Đã bật nút nổi");
     }
@@ -653,9 +813,15 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
 
     try { 
-      platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
+      await platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
     } catch (e) { 
       print("Lỗi Mock: $e"); 
+      bool isGranted = await platform.invokeMethod('checkMockPermission');
+      if (!isGranted) {
+         _stopMock();
+         _showMockPermissionDialog();
+         return; 
+      }
     }
     
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
@@ -747,9 +913,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
     LatLng currentPos = startPoint;
-    // Tăng bước nhảy khởi điểm lên khoảng 10m để thoát khỏi đáy hẹp giả
     double stepSize = 0.0001; 
-    // Thu nhỏ minStep cực nhỏ để thuật toán đạt độ chính xác đến mm thay vì bị kẹt
     double minStep = 0.000000001; 
     int maxIterations = 5000; 
     int iter = 0;
@@ -797,10 +961,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double r = _getRadiusInMeters(b);
       if (r <= 0) continue; 
       
-      // Áp dụng trọng số: điểm gần (r nhỏ) có độ tin cậy cao hơn điểm ở quá xa
       double weight = 1.0 / (r * r + 1.0); 
-      
-      // Sử dụng Mean Squared Error (bình phương sai số) để tạo đáy phễu tụ về 0m mượt hơn
       totalError += pow(d - r, 2) * weight; 
     }
     return totalError;
@@ -1063,27 +1224,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _showMsg("Đã gán gốc P1 mới với đơn vị km!");
   }
 
-  void _assignResultToNextP() {
-    if (targetPoints.isEmpty) return;
-    LatLng pointToUse = targetPoints[0];
-    int nextIndex = -1;
-    String unitToUse = 'km'; 
-    if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
-
-    for (int i = 0; i < beacons.length; i++) {
-      if (beacons[i].location == null) { nextIndex = i; break; }
-    }
-    setState(() {
-      if (nextIndex != -1) {
-        beacons[nextIndex].location = pointToUse;
-      } else {
-        beacons.add(Beacon(location: pointToUse, color: colorPalette[beacons.length % colorPalette.length], unit: unitToUse));
-        nextIndex = beacons.length - 1;
-      }
-    });
-    _requestFocus(nextIndex); 
-  }
-
   Future<void> _searchLocation() async {
     String query = _searchCtrl.text.trim();
     if (query.isEmpty) return;
@@ -1255,7 +1395,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         });
   }
 
-  // Dùng cho nút Dialog danh sách đã lưu (Vẫn giữ điều hướng)
   Future<void> _openNavigation(LatLng destination) async {
     Uri uri = Platform.isAndroid 
       ? Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}')
@@ -1263,7 +1402,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
   }
 
-  // MỚI: Chỉ xem vị trí ghim đỏ (geo), không tự động chỉ đường
   Future<void> _viewOnMap(LatLng destination) async {
     Uri uri = Platform.isAndroid 
       ? Uri.parse('geo:${destination.latitude},${destination.longitude}?q=${destination.latitude},${destination.longitude}')
@@ -1638,11 +1776,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               padding: const EdgeInsets.all(8), color: Colors.white,
               child: Column(
                 children: [
-                  SizedBox(
-                    height: 70,
-                    child: Row(
-                      children: [
-                        Expanded(
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 70,
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             itemCount: beacons.length,
@@ -1690,8 +1829,26 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             },
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      // NÚT HƯỚNG DẪN Ở GÓC TRÊN CÙNG BÊN PHẢI
+                      Container(
+                        margin: const EdgeInsets.only(left: 4, top: 2),
+                        child: ElevatedButton.icon(
+                          key: _helpKey,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade50,
+                            foregroundColor: Colors.blue.shade800,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(0, 36),
+                            elevation: 0,
+                            side: BorderSide(color: Colors.blue.shade200),
+                          ),
+                          icon: const Icon(Icons.menu_book, size: 14),
+                          label: const Text("Hướng dẫn", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          onPressed: _showInstructionBoard,
+                        ),
+                      )
+                    ],
                   ),
                   const SizedBox(height: 8),
                   GestureDetector(
@@ -1739,6 +1896,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             InkWell(
+                              key: _linkAppKey, 
                               onLongPress: _pickTargetApp, 
                               onTap: _triggerOverlay,
                               borderRadius: BorderRadius.circular(20),
@@ -1751,7 +1909,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 8),
                             IconButton(
                               icon: Icon(isSearchVisible ? Icons.search_off : Icons.search, color: Colors.blue, size: 26),
                               onPressed: () => setState(() => isSearchVisible = !isSearchVisible),
@@ -1764,109 +1922,130 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     ),
                   ),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      IconButton(
-                        padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.add_circle, color: Colors.green, size: 32), 
-                        onPressed: _addNewBeacon 
-                      ),
-
-                      Visibility(
-                        visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 32), 
-                          onPressed: () {
-                            setState(() { 
-                              beacons = []; 
-                              targetPoints.clear(); 
-                              searchMarker = null; 
-                              coordDisplay = "0.000000, 0.000000"; 
-                              addressDisplay = "Chưa có vị trí"; 
-                              addressColor = Colors.grey; 
-                              selectedIndex = null; 
-                            });
-                            _stopMock();
-                            _zoomToFitAll();
-                          }
-                        ),
-                      ),
-
-                      Visibility(
-                        visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.looks_one, color: Colors.teal, size: 32), 
-                          onPressed: _restartWithResultAsP1
-                        ),
-                      ),
-                      
-                      Visibility(
-                        visible: targetPoints.isNotEmpty,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 32), 
-                          onPressed: _assignResultToNextP
-                        ),
-                      ),
-                      
-                      Visibility(
-                        visible: selectedIndex != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.refresh, color: Colors.orange, size: 32), 
-                          onPressed: _resetCurrentBeacon
-                        ),
-                      ),
-
-                      Visibility(
-                        visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.map, color: Colors.indigo, size: 32), 
-                          onPressed: () {
-                            LatLng? locToOpen;
-                            if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
-                              locToOpen = beacons[selectedIndex!].location;
-                            } else if (targetPoints.isNotEmpty) {
-                              locToOpen = targetPoints[0];
-                            }
+                  // THANH CÔNG CỤ CỐ ĐỊNH, DÙNG VISIBILITY ĐỂ ẨN NHƯNG GIỮ CHỖ
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Nút 1: Add (Luôn hiện và đứng im)
+                            IconButton(
+                              key: _addBeaconKey,
+                              padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                              icon: const Icon(Icons.add_circle, color: Colors.green, size: 36), 
+                              onPressed: _addNewBeacon 
+                            ),
+                            const SizedBox(width: 18),
                             
-                            if (locToOpen != null) {
-                              _viewOnMap(locToOpen); 
-                            } else {
-                              _showMsg("Không có vị trí để mở bản đồ!");
-                            }
-                          }
+                            // Nút 2: Delete
+                            Visibility(
+                              visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 32), 
+                                onPressed: () {
+                                  setState(() { 
+                                    beacons = []; 
+                                    targetPoints.clear(); 
+                                    searchMarker = null; 
+                                    coordDisplay = "0.000000, 0.000000"; 
+                                    addressDisplay = "Chưa có vị trí"; 
+                                    addressColor = Colors.grey; 
+                                    selectedIndex = null; 
+                                  });
+                                  _stopMock();
+                                  _zoomToFitAll();
+                                }
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+                            
+                            // Nút 3: Restart as P1
+                            Visibility(
+                              visible: targetPoints.isNotEmpty || selectedIndex != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                icon: const Icon(Icons.looks_one, color: Colors.teal, size: 32), 
+                                onPressed: _restartWithResultAsP1
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+
+                            // Nút 5: Refresh
+                            Visibility(
+                              visible: selectedIndex != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                icon: const Icon(Icons.refresh, color: Colors.orange, size: 32), 
+                                onPressed: _resetCurrentBeacon
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+
+                            // Nút 6: Map
+                            Visibility(
+                              visible: targetPoints.isNotEmpty || selectedIndex != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                icon: const Icon(Icons.map, color: Colors.indigo, size: 32), 
+                                onPressed: () {
+                                  LatLng? locToOpen;
+                                  if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
+                                    locToOpen = beacons[selectedIndex!].location;
+                                  } else if (targetPoints.isNotEmpty) {
+                                    locToOpen = targetPoints[0];
+                                  }
+                                  if (locToOpen != null) {
+                                    _viewOnMap(locToOpen); 
+                                  } else {
+                                    _showMsg("Không có vị trí để mở bản đồ!");
+                                  }
+                                }
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+
+                            // Nút 7: Play/Stop
+                            Visibility(
+                              visible: targetPoints.isNotEmpty || selectedIndex != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                onPressed: isAnyMocking ? _stopMock : () { 
+                                   if (selectedIndex != null && beacons[selectedIndex!].location != null) {
+                                     _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
+                                   } else if (targetPoints.isNotEmpty) {
+                                     _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
+                                   }
+                                },
+                                icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+
+                            // Nút 8: Save
+                            Visibility(
+                              visible: targetPoints.isNotEmpty || selectedIndex != null,
+                              maintainSize: true, maintainAnimation: true, maintainState: true,
+                              child: IconButton(
+                                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                icon: const Icon(Icons.save, color: Colors.blue, size: 32), 
+                                onPressed: _saveCurrentTarget
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      
-                      Visibility(
-                        visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          onPressed: isAnyMocking ? _stopMock : () { 
-                             if (selectedIndex != null && beacons[selectedIndex!].location != null) {
-                               _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
-                             } else if (targetPoints.isNotEmpty) {
-                               _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
-                             }
-                          },
-                          icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
-                        ),
-                      ),
-                      
-                      Visibility(
-                        visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        child: IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.save, color: Colors.blue, size: 32), 
-                          onPressed: _saveCurrentTarget
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
