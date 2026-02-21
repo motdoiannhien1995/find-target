@@ -238,7 +238,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool isSearchVisible = false;
   String? targetAppPackage; 
   
-  // Biến chặn load map cho đến khi có GPS thực
   bool _isLoadingLocation = true; 
 
   static const double earthRadius = 6371000.0;
@@ -255,7 +254,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _loadData(); 
     _requestOverlayPermission();
     
-    // Gọi tuần tự: bắt ép lấy vị trí -> rồi mới kiểm tra mock (tránh trùng dialog)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _initLocation();
       await _checkMockPermission(); 
@@ -614,7 +612,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       await FlutterOverlayWindow.closeOverlay();
       _showMsg("Đã tắt nút nổi");
     } else {
-      // Dọn dẹp Overlay bị kẹt (Zombie) trước khi tạo mới
       try { await FlutterOverlayWindow.closeOverlay(); } catch (e) {}
       await Future.delayed(const Duration(milliseconds: 200));
       await _showInvincibleOverlay();
@@ -724,9 +721,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   List<LatLng> _calculateTwoCircleIntersectionPrecise(LatLng p1, double r1, LatLng p2, double r2) {
     double d = _haversineDistance(p1, p2);
 
-    if (d >= r1 + r2 || d <= (r1 - r2).abs() || d == 0) {
+    double tolerance = 2.0;
+    
+    if (d > r1 + r2 + tolerance || d < (r1 - r2).abs() - tolerance || d == 0) {
       return []; 
     }
+
+    if (d > r1 + r2) d = r1 + r2;
+    if (d < (r1 - r2).abs()) d = (r1 - r2).abs();
 
     double cosAlpha = (r1 * r1 + d * d - r2 * r2) / (2 * r1 * d);
     cosAlpha = max(-1.0, min(1.0, cosAlpha));
@@ -745,8 +747,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
     LatLng currentPos = startPoint;
-    double stepSize = 0.001; 
-    double minStep = 0.00000001; 
+    // Tăng bước nhảy khởi điểm lên khoảng 10m để thoát khỏi đáy hẹp giả
+    double stepSize = 0.0001; 
+    // Thu nhỏ minStep cực nhỏ để thuật toán đạt độ chính xác đến mm thay vì bị kẹt
+    double minStep = 0.000000001; 
     int maxIterations = 5000; 
     int iter = 0;
 
@@ -793,7 +797,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double r = _getRadiusInMeters(b);
       if (r <= 0) continue; 
       
-      totalError += (d - r).abs(); 
+      // Áp dụng trọng số: điểm gần (r nhỏ) có độ tin cậy cao hơn điểm ở quá xa
+      double weight = 1.0 / (r * r + 1.0); 
+      
+      // Sử dụng Mean Squared Error (bình phương sai số) để tạo đáy phễu tụ về 0m mượt hơn
+      totalError += pow(d - r, 2) * weight; 
     }
     return totalError;
   }
@@ -816,9 +824,26 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       LatLng bestStartNode;
       
       if (allRoots.isEmpty) {
-        double sLat = 0, sLng = 0;
-        for (var b in validBeacons) { sLat += b.location!.latitude; sLng += b.location!.longitude; }
-        bestStartNode = LatLng(sLat/validBeacons.length, sLng/validBeacons.length);
+        var p1 = validBeacons[0];
+        double r1 = _getRadiusInMeters(p1);
+        if (r1 <= 0) r1 = 10; 
+
+        List<LatLng> candidates = [
+          _calculatePointFromBearing(p1.location!, r1, 0),   
+          _calculatePointFromBearing(p1.location!, r1, 90),  
+          _calculatePointFromBearing(p1.location!, r1, 180), 
+          _calculatePointFromBearing(p1.location!, r1, 270), 
+        ];
+
+        double minE = double.infinity;
+        bestStartNode = candidates[0];
+        for (var c in candidates) {
+          double e = _calculateTotalError(c, validBeacons);
+          if (e < minE) {
+            minE = e;
+            bestStartNode = c;
+          }
+        }
       } else {
         double minE = double.infinity;
         bestStartNode = allRoots[0];
@@ -1019,10 +1044,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
     if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
     
-    String unitP1 = beacons.isNotEmpty ? beacons[0].unit : 'km';
+    String unitP1 = 'km';
 
     _stopMock();
     setState(() {
+      defaultUnit = 'km'; 
       beacons = [Beacon(location: newStart, color: Colors.blue, unit: unitP1)];
       targetPoints.clear();
       coordDisplay = "0.000000, 0.000000";
@@ -1034,7 +1060,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _requestFocus(0); 
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã gán gốc P1 mới!");
+    _showMsg("Đã gán gốc P1 mới với đơn vị km!");
   }
 
   void _assignResultToNextP() {
@@ -1135,13 +1161,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (pkg != null) setState(() => targetAppPackage = pkg);
   }
 
-  // LOGIC MỚI BẮT BUỘC NGƯỜI DÙNG BẬT VÀ CẤP QUYỀN VỊ TRÍ
   Future<void> _initLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
 
     while (true) {
-      // 1. Kiểm tra xem người dùng đã bật GPS chưa
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (!mounted) return;
@@ -1163,10 +1187,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             ],
           )
         );
-        continue; // Chạy lại vòng lặp để kiểm tra lại
+        continue; 
       }
 
-      // 2. Kiểm tra xem người dùng đã cấp quyền chưa
       permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -1186,7 +1209,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               ],
             )
           );
-          continue; // Chạy lại vòng lặp yêu cầu quyền
+          continue; 
         }
       }
 
@@ -1213,33 +1236,53 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         continue;
       }
 
-      // Đã thỏa mãn hết mọi điều kiện
       break; 
     }
 
-    // Tiến hành lấy vị trí thực
     Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
     LatLng current = LatLng(p.latitude, p.longitude);
 
     if (mounted) {
       setState(() {
         myRealLocation = current;
-        _isLoadingLocation = false; // Bỏ trạng thái đang tải, bắt đầu vẽ bản đồ
+        _isLoadingLocation = false; 
       });
     }
 
-    // Lắng nghe cập nhật vị trí
     Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5))
         .listen((p) { 
           if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude)); 
         });
   }
 
+  // Dùng cho nút Dialog danh sách đã lưu (Vẫn giữ điều hướng)
   Future<void> _openNavigation(LatLng destination) async {
     Uri uri = Platform.isAndroid 
       ? Uri.parse('google.navigation:q=${destination.latitude},${destination.longitude}')
       : Uri.parse('maps://?q=${destination.latitude},${destination.longitude}');
     if (await canLaunchUrl(uri)) { await launchUrl(uri); } else { _showMsg("Lỗi mở bản đồ"); }
+  }
+
+  // MỚI: Chỉ xem vị trí ghim đỏ (geo), không tự động chỉ đường
+  Future<void> _viewOnMap(LatLng destination) async {
+    Uri uri = Platform.isAndroid 
+      ? Uri.parse('geo:${destination.latitude},${destination.longitude}?q=${destination.latitude},${destination.longitude}')
+      : Uri.parse('https://maps.apple.com/?ll=${destination.latitude},${destination.longitude}&q=Vị+trí+Mock');
+      
+    try {
+      if (await canLaunchUrl(uri)) { 
+        await launchUrl(uri); 
+      } else { 
+        Uri webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=${destination.latitude},${destination.longitude}');
+        if (await canLaunchUrl(webUri)) {
+           await launchUrl(webUri);
+        } else {
+           _showMsg("Lỗi mở bản đồ");
+        }
+      }
+    } catch(e) {
+        _showMsg("Lỗi mở bản đồ");
+    }
   }
 
   void _editTargetName(int index) {
@@ -1725,15 +1768,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), 
+                        padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                        icon: const Icon(Icons.add_circle, color: Colors.green, size: 32), 
                         onPressed: _addNewBeacon 
                       ),
 
                       Visibility(
                         visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
                         child: IconButton(
-                          icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 30), 
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 32), 
                           onPressed: () {
                             setState(() { 
                               beacons = []; 
@@ -1752,26 +1796,57 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
-                        child: IconButton(icon: const Icon(Icons.looks_one, color: Colors.teal, size: 28), onPressed: _restartWithResultAsP1),
+                        child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.looks_one, color: Colors.teal, size: 32), 
+                          onPressed: _restartWithResultAsP1
+                        ),
                       ),
                       
                       Visibility(
                         visible: targetPoints.isNotEmpty,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
-                        child: IconButton(icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 28), onPressed: _assignResultToNextP),
+                        child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.playlist_add_check, color: Colors.green, size: 32), 
+                          onPressed: _assignResultToNextP
+                        ),
                       ),
                       
                       Visibility(
                         visible: selectedIndex != null,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
-                        child: IconButton(icon: const Icon(Icons.refresh, color: Colors.orange, size: 28), onPressed: _resetCurrentBeacon),
+                        child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.refresh, color: Colors.orange, size: 32), 
+                          onPressed: _resetCurrentBeacon
+                        ),
+                      ),
+
+                      Visibility(
+                        visible: targetPoints.isNotEmpty || selectedIndex != null,
+                        child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.map, color: Colors.indigo, size: 32), 
+                          onPressed: () {
+                            LatLng? locToOpen;
+                            if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
+                              locToOpen = beacons[selectedIndex!].location;
+                            } else if (targetPoints.isNotEmpty) {
+                              locToOpen = targetPoints[0];
+                            }
+                            
+                            if (locToOpen != null) {
+                              _viewOnMap(locToOpen); 
+                            } else {
+                              _showMsg("Không có vị trí để mở bản đồ!");
+                            }
+                          }
+                        ),
                       ),
                       
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
                         child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
                           onPressed: isAnyMocking ? _stopMock : () { 
                              if (selectedIndex != null && beacons[selectedIndex!].location != null) {
                                _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
@@ -1785,8 +1860,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                       
                       Visibility(
                         visible: targetPoints.isNotEmpty || selectedIndex != null,
-                        maintainSize: true, maintainAnimation: true, maintainState: true,
-                        child: IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: _saveCurrentTarget),
+                        child: IconButton(
+                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.save, color: Colors.blue, size: 32), 
+                          onPressed: _saveCurrentTarget
+                        ),
                       ),
                     ],
                   ),
