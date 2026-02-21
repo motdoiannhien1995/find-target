@@ -632,7 +632,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   double _getRadiusInMeters(Beacon b) {
-    double inputVal = double.tryParse(b.controller.text) ?? 0;
+    double inputVal = double.tryParse(b.controller.text.replaceAll(',', '.')) ?? 0;
     if (inputVal == 0) return 0;
     return inputVal * unitToMeter[b.unit]!;
   }
@@ -1091,7 +1091,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         for (int i = 0; i < beacons.length; i++) {
           if (i == index) continue;
           if (beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
-             double? dist = double.tryParse(beacons[i].controller.text);
+             double? dist = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
              if (dist != null && dist > 0 && dist < minDistance) {
                  minDistance = dist;
                  bestReferenceIndex = i;
@@ -1162,7 +1162,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     for (int i = 0; i < beacons.length; i++) {
       if (i == index) continue;
       if (beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
-         double? d = double.tryParse(beacons[i].controller.text);
+         double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
          if (d != null && d > 0 && d < minRefDist) { minRefDist = d; bestRefIndex = i; }
       }
     }
@@ -1730,7 +1730,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         if (newIndex > 0) {
            Beacon prevBeacon = beacons[newIndex - 1];
            if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                   double? r = double.tryParse(prevBeacon.controller.text);
+                   double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
                    if (r != null && r > 0) {
                         double distMeters = _getRadiusInMeters(prevBeacon);
                         LatLng center = prevBeacon.location!;
@@ -1807,7 +1807,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                     TextField(
                                       controller: beacons[i].controller, 
                                       focusNode: beacons[i].focusNode, 
-                                      keyboardType: TextInputType.number, 
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true), 
                                       textAlign: TextAlign.center, 
                                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                                       onTap: () {
