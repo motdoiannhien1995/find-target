@@ -1339,36 +1339,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
 
         if (finalPoint != null) {
-            bool allUnder100m = true;
-            for (var b in beacons) {
-                double r = _getRadiusInMeters(b);
-                if (r >= 100 || r == 0) {
-                    allUnder100m = false;
-                    break;
-                }
-            }
-
-            int worstIndex = -1;
-
-            if (allUnder100m) {
-                worstIndex = 0;
-            } else {
-                double maxError = -1;
-                for (int k = 0; k < beacons.length; k++) {
-                  if (beacons[k].location != null && beacons[k].controller.text.isNotEmpty) {
-                    double r = _getRadiusInMeters(beacons[k]);
-                    if (r > 0) {
-                        double d = _haversineDistance(beacons[k].location!, finalPoint);
-                        double error = (d - r).abs();
-                        if (error > maxError) { maxError = error; worstIndex = k; }
-                    }
-                  }
-                }
-            }
-
-            if (worstIndex != -1) {
-              beacons[worstIndex].dispose();
-              beacons.removeAt(worstIndex);
+            
+            // LOGIC MỚI: LUÔN LUÔN XÓA P CŨ NHẤT (INDEX 0)
+            int oldestIndex = 0;
+            if (beacons.isNotEmpty) {
+              beacons[oldestIndex].dispose();
+              beacons.removeAt(oldestIndex);
             }
 
             beacons.add(Beacon(location: finalPoint, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
