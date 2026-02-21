@@ -133,23 +133,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               }
             },
 
-            onLongPress: () async {
-              if (mounted) {
-                setState(() {
-                  _bgColor = Colors.red;
-                  _icon = Icons.close;
-                });
-              }
-              await Future.delayed(const Duration(milliseconds: 300));
-              await FlutterOverlayWindow.closeOverlay();
-              if (mounted) {
-                setState(() {
-                  _bgColor = Colors.blueAccent;
-                  _icon = Icons.login;
-                });
-              }
-            },
-
             child: Icon(_icon, color: Colors.white, size: 32),
           ),
         ),
@@ -624,6 +607,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       await FlutterOverlayWindow.closeOverlay();
       _showMsg("Đã tắt nút nổi");
     } else {
+      // Dọn dẹp Overlay bị kẹt (Zombie) trước khi tạo mới
+      try { await FlutterOverlayWindow.closeOverlay(); } catch (e) {}
+      await Future.delayed(const Duration(milliseconds: 200));
       await _showInvincibleOverlay();
       _showMsg("Đã bật nút nổi");
     }
@@ -799,8 +785,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double d = _haversineDistance(p, b.location!);
       double r = _getRadiusInMeters(b);
       if (r <= 0) continue; 
-      // Dùng sai số tuyệt đối (L1 norm) thay vì bình phương (L2 norm) có trọng số
-      // Tránh việc điểm nhập sai bị phóng đại quá mức, kéo lệch tối ưu.
+      
       totalError += (d - r).abs(); 
     }
     return totalError;
@@ -1790,4 +1775,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}  // mock cập nhật nhanh vị trí
+}
