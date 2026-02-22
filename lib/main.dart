@@ -276,6 +276,22 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
+  // CÁC HÀM HELPER XỬ LÝ TÊN VÀ MÀU SẮC ĐIỂM
+  String _getBeaconName(int index) {
+    if (index < 3) return "Mốc ${index + 1}";
+    return "Mục tiêu ${index - 2}";
+  }
+
+  String _getBeaconShortName(int index) {
+    if (index < 3) return "M${index + 1}";
+    return "T${index - 2}";
+  }
+
+  Color _getBeaconColor(int index, Color originalColor) {
+    if (index < 3) return Colors.blueGrey.shade800; // Màu tối cho 3 mốc đầu
+    return originalColor;
+  }
+
   void _showInstructionBoard() {
     showDialog(
       context: context,
@@ -289,23 +305,65 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             Text("HƯỚNG DẪN", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: const SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("BƯỚC 1: Chọn App Mục Tiêu", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
-              Text("- Nhấn giữ vào biểu tượng 'Layer' (lớp lưới) để chọn app mà bạn muốn đo (ví dụ: Heesay). Nút Cửa sổ nổi sẽ tự động bật lên màn hình."),
-              SizedBox(height: 10),
-              Text("BƯỚC 2: Thêm Điểm Mô Phỏng", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
-              Text("- Bấm dấu [+] màu xanh lá để thêm điểm P1.\n- Nhập khoảng cách đo được từ app mục tiêu vào ô của P1."),
-              SizedBox(height: 10),
-              Text("BƯỚC 3: Đo Tọa Độ Nâng Cao", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
-              Text("- Bấm tiếp dấu [+] để thêm P2, P3 và nhập khoảng cách tương tự.\n- Khi có từ 2-3 điểm, app sẽ tự động vẽ vòng tròn và tìm ra giao điểm chính xác của mục tiêu."),
-              SizedBox(height: 10),
-              Text("BƯỚC 4: Chuyển Nhanh", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
-              Text("- Sử dụng Cửa sổ nổi (Nút tròn trên màn hình) để chuyển đổi qua lại siêu tốc giữa App này và App mục tiêu."),
-            ],
+        contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Các nút công cụ chính:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+                const SizedBox(height: 10),
+                _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo (HeeSay, Grindr...). Bấm để bật/tắt nút cửa sổ nổi chuyển App nhanh."),
+                _buildInstructionRow(Icons.add_circle, Colors.green, "Thêm không giới hạn Mốc/Mục tiêu ra bản đồ để đo khoảng cách tới mục tiêu."),
+                _buildInstructionRow(Icons.delete_sweep, Colors.red, "Xóa sạch toàn bộ Mốc/Mục tiêu, điểm tìm kiếm và mục tiêu trên bản đồ để bắt đầu tính toán lại."),
+                _buildInstructionRow(Icons.looks_one, Colors.teal, "Lấy tọa độ đang chạy gán vào Mốc 1 mới để tiếp tục dò đường."),
+                _buildInstructionRow(Icons.refresh, Colors.orange, "Tính lại vị trí cho điểm hiện tại. Nếu chỉ có 2 điểm tham chiếu sẽ đảo qua lại giữa 2 giao điểm (K1, K2). Nếu có 3 điểm trở lên sẽ tìm vị trí chính xác."),
+                _buildInstructionRow(Icons.map, Colors.indigo, "Xem tọa độ trên ứng dụng bản đồ khác (Google Maps..)."),
+                _buildInstructionRow(Icons.play_circle, Colors.green, "Bắt đầu/Dừng phát vị trí mô phỏng đến máy."),
+                _buildInstructionRow(Icons.save, Colors.blue, "Lưu lại tọa độ của mục tiêu vào danh sách để sử dụng lại sau."),
+                _buildInstructionRow(Icons.search, Colors.blue, "Tìm kiếm địa danh hoặc dán trực tiếp tọa độ để di chuyển đến."),
+                _buildInstructionRow(Icons.list, Colors.purple, "Mở danh sách các vị trí bạn đã lưu để xem lại hoặc dẫn đường."),
+                const SizedBox(height: 10),
+                const Text("Nguyên lý đo tọa độ:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+                const Padding(
+                  padding: EdgeInsets.only(left: 8.0, top: 4.0),
+                  child: Text(
+                    "- Tạo các Mốc đo và nhập khoảng cách để tính toán ra vị trí Mục tiêu (tọa độ cần tìm).\n"
+                    "- Nếu Mục tiêu tính được đo trên app đích vẫn chưa là 0m, hãy tiếp tục nhập khoảng cách đó và thêm Mục tiêu mới để app tính lại.\n"
+                    "- Lặp lại cho tới khi thấy khoảng cách báo 0m - đó chính là tọa độ chính xác của mục tiêu cần tìm.\n"
+                    "- App tự động cách ly và xóa những điểm bị nhập sai số quá lớn.", 
+                    style: TextStyle(fontSize: 13, height: 1.4)
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const Divider(),
+                const Text("Hỗ trợ trực tuyến:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
+                const SizedBox(height: 10),
+                Center(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.forum, size: 22),
+                    label: const Text("Tham gia nhóm Zalo hỗ trợ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    onPressed: () async {
+                      final Uri url = Uri.parse('https://zalo.me/g/lpzusw024');
+                      try {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } catch (e) {
+                         _showMsg("Không thể mở link Zalo");
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 15),
+              ],
+            ),
           ),
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -317,6 +375,25 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           )
         ],
       )
+    );
+  }
+
+  Widget _buildInstructionRow(IconData icon, Color color, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.black87),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -350,7 +427,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               children: [
                 Text("BƯỚC 1: Liên kết ứng dụng", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
                 SizedBox(height: 10),
-                Text("Nhấn giữ (Long press) vào biểu tượng này để chọn app bạn muốn đo khoảng cách.", style: TextStyle(color: Colors.white, fontSize: 16)),
+                Text("Nhấn giữ vào biểu tượng này để chọn app dùng để đo khoảng cách (HeeSay, Grindr, ...).", style: TextStyle(color: Colors.white, fontSize: 16)),
               ],
             ),
           ),
@@ -368,7 +445,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               children: [
                 Text("BƯỚC 2: Thêm điểm mô phỏng", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
                 SizedBox(height: 10),
-                Text("Bấm vào dấu cộng này để bắt đầu thêm các điểm P ra bản đồ nhé.", style: TextStyle(color: Colors.white, fontSize: 16)),
+                Text("Bấm vào dấu cộng để bắt đầu thêm các Mốc (Mốc 1, 2, 3) ra bản đồ để đo khoảng cách. Khi đã đủ 3 mốc, các điểm tiếp theo sẽ là Mục tiêu (Mục tiêu 1, 2...).", style: TextStyle(color: Colors.white, fontSize: 16)),
               ],
             ),
           ),
@@ -386,7 +463,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               children: [
                 Text("Bảng hướng dẫn chi tiết", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
                 SizedBox(height: 10),
-                Text("Bất cứ khi nào bạn quên cách dùng, hãy bấm vào đây để đọc bảng hướng dẫn nhé!", style: TextStyle(color: Colors.white, fontSize: 16)),
+                Text("Bấm vào đây để đọc bảng hướng dẫn chi tiết và vào nhóm hỗ trợ nhé!", style: TextStyle(color: Colors.white, fontSize: 16)),
               ],
             ),
           ),
@@ -424,26 +501,80 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         child: AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
           title: const Text("Bắt Buộc Cấp Quyền", textAlign: TextAlign.center, style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          content: const Text(
-            "Bạn PHẢI chọn ứng dụng này trong mục 'Ứng dụng vị trí mô phỏng' (Mock Location) ở Tùy chọn nhà phát triển thì mới có thể sử dụng được app.\n\n"
-            "Vui lòng nhấn nút bên dưới để tới Cài đặt.",
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14),
-          ),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
-              onPressed: () async {
-                try {
-                  await platform.invokeMethod('openDeveloperOptions');
-                } catch (e) {
-                  _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
-                }
-              },
-              child: const Text("Tới Cài Đặt Ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Bạn PHẢI chọn ứng dụng này trong mục 'Ứng dụng vị trí mô phỏng' (Mock Location) ở Tùy chọn nhà phát triển thì mới có thể sử dụng được app.",
+                  style: TextStyle(fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  "Cách bật Tùy chọn nhà phát triển (nếu chưa có):",
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  "Vào Cài đặt máy -> Giới thiệu điện thoại -> Nhấn liên tục 7 lần vào 'Số hiệu bản tạo' (hoặc 'Phiên bản MIUI/OS').",
+                  style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                
+                // NÚT CHÍNH ĐƯỢC ĐƯA LÊN TRÊN ĐÂY
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent, 
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () async {
+                      try {
+                        await platform.invokeMethod('openDeveloperOptions');
+                      } catch (e) {
+                        _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
+                      }
+                    },
+                    child: const Text("Tới Cài Đặt Ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+                const Divider(), // KẺ NGANG
+                const SizedBox(height: 8),
+                
+                // PHẦN PHỤ HỖ TRỢ ZALO Ở DƯỚI
+                const Text(
+                  "Cần hỗ trợ trực tiếp?",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  icon: const Icon(Icons.forum, size: 20),
+                  label: const Text("Tham gia nhóm Zalo", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  onPressed: () async {
+                    final Uri url = Uri.parse('https://zalo.me/g/lpzusw024');
+                    try {
+                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                    } catch (e) {
+                       _showMsg("Không thể mở link Zalo");
+                    }
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -962,62 +1093,122 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       if (r <= 0) continue; 
       
       double weight = 1.0 / (r * r + 1.0); 
-      totalError += pow(d - r, 2) * weight; 
+      double err = (d - r).abs();
+      double loss = err < 50.0 ? 0.5 * err * err : 50.0 * (err - 25.0);
+      totalError += loss * weight; 
     }
     return totalError;
   }
 
+  // Hàm tính điểm Best Fit (chính xác) dành cho 3 điểm trở lên
+  LatLng? _calculateBestFit(List<Beacon> validBeacons) {
+    if (validBeacons.length < 2) return null;
+
+    List<LatLng> allRoots = [];
+    
+    for (int i = 0; i < validBeacons.length - 1; i++) {
+        for (int j = i + 1; j < validBeacons.length; j++) {
+            double r1 = _getRadiusInMeters(validBeacons[i]);
+            double r2 = _getRadiusInMeters(validBeacons[j]);
+            var roots = _calculateTwoCircleIntersectionPrecise(validBeacons[i].location!, r1, validBeacons[j].location!, r2);
+            allRoots.addAll(roots);
+        }
+    }
+
+    LatLng bestStartNode;
+    
+    if (allRoots.isEmpty) {
+      var p1 = validBeacons[0];
+      double r1 = _getRadiusInMeters(p1);
+      if (r1 <= 0) r1 = 10; 
+
+      List<LatLng> candidates = [
+        _calculatePointFromBearing(p1.location!, r1, 0),   
+        _calculatePointFromBearing(p1.location!, r1, 90),  
+        _calculatePointFromBearing(p1.location!, r1, 180), 
+        _calculatePointFromBearing(p1.location!, r1, 270), 
+      ];
+
+      double minE = double.infinity;
+      bestStartNode = candidates[0];
+      for (var c in candidates) {
+        double e = _calculateTotalError(c, validBeacons);
+        if (e < minE) {
+          minE = e;
+          bestStartNode = c;
+        }
+      }
+    } else {
+      double minE = double.infinity;
+      bestStartNode = allRoots[0];
+      for (var root in allRoots) {
+          double e = _calculateTotalError(root, validBeacons);
+          if (e < minE) {
+              minE = e;
+              bestStartNode = root;
+          }
+      }
+    }
+    
+    return _optimizePoint(bestStartNode, validBeacons);
+  }
+
+  // HÀM MỚI: Tự động phát hiện và xóa điểm bị sai số
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
+      if (validBeacons.length == 2) return _calculateBestFit(validBeacons);
 
-      List<LatLng> allRoots = [];
-      
-      for (int i = 0; i < validBeacons.length - 1; i++) {
-         for (int j = i + 1; j < validBeacons.length; j++) {
-             double r1 = _getRadiusInMeters(validBeacons[i]);
-             double r2 = _getRadiusInMeters(validBeacons[j]);
-             var roots = _calculateTwoCircleIntersectionPrecise(validBeacons[i].location!, r1, validBeacons[j].location!, r2);
-             allRoots.addAll(roots);
-         }
-      }
+      List<Beacon> filtered = List.from(validBeacons);
+      LatLng? bestPos;
+      List<Beacon> toRemove = [];
 
-      LatLng bestStartNode;
-      
-      if (allRoots.isEmpty) {
-        var p1 = validBeacons[0];
-        double r1 = _getRadiusInMeters(p1);
-        if (r1 <= 0) r1 = 10; 
+      int maxIterations = validBeacons.length - 2; 
+      for (int i = 0; i < maxIterations; i++) {
+          bestPos = _calculateBestFit(filtered);
+          if (bestPos == null) break;
 
-        List<LatLng> candidates = [
-          _calculatePointFromBearing(p1.location!, r1, 0),   
-          _calculatePointFromBearing(p1.location!, r1, 90),  
-          _calculatePointFromBearing(p1.location!, r1, 180), 
-          _calculatePointFromBearing(p1.location!, r1, 270), 
-        ];
-
-        double minE = double.infinity;
-        bestStartNode = candidates[0];
-        for (var c in candidates) {
-          double e = _calculateTotalError(c, validBeacons);
-          if (e < minE) {
-            minE = e;
-            bestStartNode = c;
+          double maxErr = 0;
+          Beacon? worstB;
+          
+          for (var b in filtered) {
+              double r = _getRadiusInMeters(b);
+              if (r <= 0) continue;
+              double d = _haversineDistance(bestPos, b.location!);
+              double err = (d - r).abs();
+              
+              if (err > maxErr && err > 50.0 && err > r * 0.1) {
+                  maxErr = err;
+                  worstB = b;
+              }
           }
-        }
-      } else {
-        double minE = double.infinity;
-        bestStartNode = allRoots[0];
-        for (var root in allRoots) {
-            double e = _calculateTotalError(root, validBeacons);
-            if (e < minE) {
-                minE = e;
-                bestStartNode = root;
-            }
-        }
+
+          if (worstB != null) {
+              filtered.remove(worstB);
+              toRemove.add(worstB);
+          } else {
+              break; 
+          }
       }
-      
-      return _optimizePoint(bestStartNode, validBeacons);
+
+      if (toRemove.isNotEmpty) {
+          for (var b in toRemove) {
+              int idx = beacons.indexOf(b);
+              if (idx != -1) {
+                  if (selectedIndex == idx) selectedIndex = null;
+                  else if (selectedIndex != null && selectedIndex! > idx) selectedIndex = selectedIndex! - 1;
+                  
+                  b.dispose();
+                  beacons.removeAt(idx);
+                  
+                  Future.delayed(Duration.zero, () {
+                      _showMsg("Đã xóa ${_getBeaconName(idx)} do phát hiện khoảng cách bị nhập sai!");
+                  });
+              }
+          }
+      }
+
+      return bestPos ?? _calculateBestFit(filtered.isNotEmpty ? filtered : validBeacons);
   }
 
   void _requestFocus(int index) {
@@ -1052,7 +1243,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
     _requestFocus(targetIndex); 
     _setMock(location.latitude, location.longitude);
-    _showMsg("Đang chạy P${targetIndex + 1}");
+    _showMsg("Đang chạy ${_getBeaconName(targetIndex)}");
   }
 
   double _calculateOptimalBearing(LatLng center, int currentIndex) {
@@ -1122,79 +1313,70 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } catch (e) { _showMsg("Lỗi"); }
   }
 
+  // --- HÀM REFRESH PHÂN TÁCH LOGIC CHO TRƯỜNG HỢP < 3 ĐIỂM VÀ >= 3 ĐIỂM ---
   Future<void> _resetCurrentBeacon() async {
-    if (selectedIndex == null) { _showMsg("Chưa chọn điểm P nào để reset!"); return; }
+    if (selectedIndex == null) {
+      _showMsg("Chưa chọn điểm nào để tính lại!");
+      return;
+    }
     int index = selectedIndex!;
 
-    if (index == 2 && beacons.length >= 3) {
-       var b1 = beacons[0];
-       var b2 = beacons[1];
-       if (b1.location != null && b1.controller.text.isNotEmpty &&
-           b2.location != null && b2.controller.text.isNotEmpty) {
-           
-           double r1 = _getRadiusInMeters(b1);
-           double r2 = _getRadiusInMeters(b2);
-           List<LatLng> roots = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
-
-           if (roots.length == 2) {
-             LatLng k1 = roots[0];
-             LatLng k2 = roots[1];
-             LatLng currentP3 = beacons[index].location ?? k1; 
-             double dist1 = _haversineDistance(currentP3, k1);
-             double dist2 = _haversineDistance(currentP3, k2);
-
-             LatLng newPos = (dist1 < dist2) ? k1 : k2;
-
-             setState(() {
-               beacons[index].location = newPos;
-               targetPoints.clear(); 
-             });
-             _setMock(newPos.latitude, newPos.longitude);
-             _zoomToFitAll(); 
-             return; 
-           }
-       }
-    }
-
-    int bestRefIndex = -1;
-    double minRefDist = double.infinity;
-
+    List<Beacon> otherBeacons = [];
     for (int i = 0; i < beacons.length; i++) {
-      if (i == index) continue;
-      if (beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
-         double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
-         if (d != null && d > 0 && d < minRefDist) { minRefDist = d; bestRefIndex = i; }
+      if (i != index && beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
+        double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
+        if (d != null && d > 0) {
+          otherBeacons.add(beacons[i]);
+        }
       }
     }
 
-    LatLng newPos;
-    if (bestRefIndex != -1) {
-      double distMeters = _getRadiusInMeters(beacons[bestRefIndex]);
-      LatLng center = beacons[bestRefIndex].location!;
-      int currentStep = beacons[index].resetStep; 
-      double fixedBearing = 0.0;
-      switch (currentStep % 4) {
-        case 0: fixedBearing = 0.0; break;
-        case 1: fixedBearing = 180.0; break;
-        case 2: fixedBearing = 270.0; break;
-        case 3: fixedBearing = 90.0; break;
+    LatLng? newPos;
+
+    if (otherBeacons.length >= 3) {
+      newPos = _calculateBestFit(otherBeacons);
+    } else if (otherBeacons.length == 2) {
+      var b1 = otherBeacons[0];
+      var b2 = otherBeacons[1];
+      double r1 = _getRadiusInMeters(b1);
+      double r2 = _getRadiusInMeters(b2);
+
+      List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+
+      if (intersections.isNotEmpty) {
+        if (intersections.length == 2 && beacons[index].location != null) {
+          LatLng currentPos = beacons[index].location!;
+          double d1 = _haversineDistance(currentPos, intersections[0]);
+          double d2 = _haversineDistance(currentPos, intersections[1]);
+          newPos = (d1 > d2) ? intersections[0] : intersections[1];
+        } else {
+          newPos = intersections[0];
+        }
       }
-      beacons[index].resetStep++; 
-      newPos = _calculatePointFromBearing(center, distMeters, fixedBearing);
+    } else if (otherBeacons.length == 1) {
+      var ref = otherBeacons[0];
+      double r = _getRadiusInMeters(ref);
+      if (beacons[index].location != null) {
+        double bearing = _calculateBearing(ref.location!, beacons[index].location!);
+        newPos = _calculatePointFromBearing(ref.location!, r, bearing);
+      } else {
+        newPos = _calculatePointFromBearing(ref.location!, r, 0);
+      }
+    }
+
+    if (newPos != null) {
+      setState(() {
+        beacons[index].location = newPos;
+        targetPoints.clear();
+      });
+      _requestFocus(index); 
+      _mapController.move(newPos, _mapController.camera.zoom);
+      _setMock(newPos.latitude, newPos.longitude);
+      _zoomToFitAll();
+      _showMsg(otherBeacons.length >= 3 ? "Đã tính lại vị trí chính xác!" : "Đã đảo vị trí K1/K2 thành công!");
     } else {
-      Position p = await Geolocator.getCurrentPosition();
-      newPos = LatLng(p.latitude, p.longitude);
+      _showMsg("Không đủ dữ liệu để tính lại! Cần ít nhất 1-2 điểm khác.");
     }
-
-    setState(() {
-      beacons[index].location = newPos;
-      beacons[index].controller.clear();
-      targetPoints.clear();
-    });
-    _requestFocus(index); 
-    _mapController.move(newPos, _mapController.camera.zoom);
-    _setMock(newPos.latitude, newPos.longitude);
-    _zoomToFitAll(); 
   }
 
   void _restartWithResultAsP1() {
@@ -1207,7 +1389,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     
     String unitP1 = 'km';
 
-    _stopMock();
     setState(() {
       defaultUnit = 'km'; 
       beacons = [Beacon(location: newStart, color: Colors.blue, unit: unitP1)];
@@ -1221,7 +1402,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _requestFocus(0); 
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
-    _showMsg("Đã gán gốc P1 mới với đơn vị km!");
+    _showMsg("Đã gán và chạy Mốc 1 mới!");
   }
 
   Future<void> _searchLocation() async {
@@ -1257,9 +1438,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   void _saveCurrentTarget() {
     LatLng? pointToSave;
     String defaultName = "";
-    if (isMockingTarget && targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu ${savedTargets.length + 1}"; } 
-    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { pointToSave = beacons[selectedIndex!].location; defaultName = "Điểm P${selectedIndex! + 1}"; }
-    else if (targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu ${savedTargets.length + 1}"; }
+    if (isMockingTarget && targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu đã lưu ${savedTargets.length + 1}"; } 
+    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { pointToSave = beacons[selectedIndex!].location; defaultName = _getBeaconName(selectedIndex!); }
+    else if (targetPoints.isNotEmpty) { pointToSave = targetPoints[0]; defaultName = "Mục tiêu đã lưu ${savedTargets.length + 1}"; }
 
     if (pointToSave == null) { _showMsg("Không có tọa độ đang chạy để lưu!"); return; }
     TextEditingController nameCtrl = TextEditingController(text: defaultName);
@@ -1455,7 +1636,29 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  void _showMsg(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 2)));
+  // HÀM MỚI: Hiển thị thông báo ở trên cùng màn hình
+  void _showMsg(String m) {
+    ScaffoldMessenger.of(context).clearSnackBars(); 
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          m, 
+          textAlign: TextAlign.center, 
+          style: const TextStyle(color: Colors.white, fontSize: 13) // Đã bỏ in đậm
+        ),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.black.withOpacity(0.7), // Bớt đen đặc
+        elevation: 2, // Giảm độ nổi bóng
+        margin: EdgeInsets.only(
+          bottom: MediaQuery.of(context).size.height * 0.8, 
+          left: 20,
+          right: 20,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      )
+    );
+  }
 
   void _showSearchOptions() {
     if (searchMarker == null) return;
@@ -1477,7 +1680,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Xóa điểm P${index + 1}?"),
+        title: Text("Xóa ${_getBeaconName(index)}?"),
         content: const Text("Dữ liệu của điểm này sẽ bị mất."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
@@ -1499,7 +1702,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       beacons.removeAt(index);
       targetPoints.clear(); 
     });
-    _showMsg("Đã xóa P${index + 1} cũ");
+    _showMsg("Đã xóa ${_getBeaconName(index)} cũ");
     _zoomToFitAll(); 
   }
 
@@ -1628,7 +1831,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (beacons.isNotEmpty) {
       Beacon last = beacons.last;
       if (last.location == null || last.controller.text.trim().isEmpty) {
-        _showMsg("P${beacons.length} chưa hoàn thành!");
+        _showMsg("${_getBeaconName(beacons.length - 1)} chưa hoàn thành!");
         return;
       }
     }
@@ -1681,12 +1884,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
 
         if (finalPoint != null) {
-            int oldestIndex = 0;
-            if (beacons.isNotEmpty) {
-              beacons[oldestIndex].dispose();
-              beacons.removeAt(oldestIndex);
-            }
-
             beacons.add(Beacon(location: finalPoint, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
             
             selectedIndex = beacons.length - 1;
@@ -1798,10 +1995,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         width: double.infinity,
                                         alignment: Alignment.center, padding: const EdgeInsets.symmetric(vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? beacons[i].color : Colors.grey.shade400),
+                                          color: selectedIndex == i ? Colors.red : (beacons[i].location != null ? _getBeaconColor(i, beacons[i].color) : Colors.grey.shade400),
                                           borderRadius: BorderRadius.circular(4),
                                         ),
-                                        child: Text("P${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        child: Text(_getBeaconName(i), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
                                       ),
                                     ),
                                     TextField(
@@ -1966,7 +2163,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
                             
-                            // Nút 3: Restart as P1
+                            // Nút 3: Restart as Mốc 1
                             Visibility(
                               visible: targetPoints.isNotEmpty || selectedIndex != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -1980,7 +2177,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                             // Nút 5: Refresh
                             Visibility(
-                              visible: selectedIndex != null,
+                              visible: selectedIndex != null, 
                               maintainSize: true, maintainAnimation: true, maintainState: true,
                               child: IconButton(
                                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
@@ -2118,7 +2315,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                           _requestFocus(targetIndex);
                           _setMock(latlng.latitude, latlng.longitude);
-                          _showMsg("Đã gán và MOCK P${targetIndex + 1}");
+                          _showMsg("Đã gán và MOCK ${_getBeaconName(targetIndex)}");
                         },
                       ),
                       children: [
@@ -2147,7 +2344,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             if (searchMarker != null) Marker(point: searchMarker!, width: 60, height: 60, child: GestureDetector(onTap: _showSearchOptions, child: const Icon(Icons.location_on, color: Colors.red, size: 40))),
                             for (int i = 0; i < beacons.length; i++)
                               if (beacons[i].location != null)
-                                Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : beacons[i].color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text("${i+1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
+                                Marker(point: beacons[i].location!, width: 30, height: 30, child: Container(decoration: BoxDecoration(color: selectedIndex == i ? Colors.red : _getBeaconColor(i, beacons[i].color), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Center(child: Text(_getBeaconShortName(i), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))))),
                             for (int i = 0; i < targetPoints.length; i++)
                               Marker(point: targetPoints[i], width: 60, height: 60, child: const Icon(Icons.location_searching, color: Colors.green, size: 35)),
                             for (int i = 0; i < savedTargets.length; i++)
@@ -2174,4 +2371,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} // ok
