@@ -61,19 +61,59 @@ class MainActivity: FlutterActivity() {
                     stopMock()
                     result.success(null)
                 }
-                // --- ĐOẠN CODE MỚI THÊM VÀO DƯỚI ĐÂY ---
                 "checkMockPermission" -> {
                     result.success(isMockLocationEnabled())
                 }
-                "openDeveloperOptions" -> {
+                "checkDevOptionsStatus" -> {
                     try {
-                        startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-                        result.success(true)
+                        val isDevEnabled = Settings.Global.getInt(
+                            contentResolver,
+                            Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
+                            0
+                        ) == 1
+                        result.success(isDevEnabled)
                     } catch (e: Exception) {
-                        result.error("UNAVAILABLE", "Không thể mở Developer Options", null)
+                        result.success(false)
                     }
                 }
-                // ----------------------------------------
+                "openDeveloperOptions" -> {
+                    try {
+                        // Chủ động kiểm tra cờ hệ thống xem Tùy chọn PT đã bật chưa
+                        val isDevEnabled = Settings.Global.getInt(
+                            contentResolver,
+                            Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
+                            0
+                        ) == 1
+
+                        if (isDevEnabled) {
+                            // ĐÃ BẬT -> Mở thẳng vào trong Tùy chọn nhà phát triển
+                            val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        } else {
+                            // CHƯA BẬT -> Ép mở trang Giới thiệu điện thoại
+                            val fallbackIntent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+                            fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(fallbackIntent)
+                            
+                            // Hiện Toast hướng dẫn nhanh cho người dùng
+                            runOnUiThread { 
+                                Toast.makeText(this, "Hãy tìm 'Số hiệu bản tạo' và chạm 7 lần để bật nhà phát triển!", Toast.LENGTH_LONG).show() 
+                            }
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        try {
+                            // Dự phòng cuối: Nếu máy quá đặc biệt chặn mọi thứ, lùi về Cài đặt chung
+                            val finalFallback = Intent(Settings.ACTION_SETTINGS)
+                            finalFallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(finalFallback)
+                            result.success(true)
+                        } catch (e3: Exception) {
+                            result.error("UNAVAILABLE", "Không thể mở trang Cài đặt", null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

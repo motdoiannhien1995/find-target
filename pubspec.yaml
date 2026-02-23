@@ -1,7 +1,7 @@
 name: trilaterat_tool
 description: "App xác định tọa độ bằng hình học Trilateration."
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+4
 
 environment:
   sdk: '>=3.10.7 <4.0.0'

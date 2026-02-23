@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart' hide ServiceStatus;
 import 'package:geolocator/geolocator.dart';
 import 'dart:async'; 
 import 'dart:math';
@@ -223,9 +223,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool _isTutorialShowing = false;
   bool _isMockDialogShowing = false; 
 
+  // --- THÊM BIẾN KIỂM SOÁT BẬT/TẮT GPS ---
+  StreamSubscription<ServiceStatus>? _serviceStatusStreamSubscription;
+  bool _isGpsDialogShowing = false;
+
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 50;
+  final int maxTrial = 100; // ĐÃ TĂNG LÊN 100
   bool allowTrialFromServer = true; 
   String? deviceId;
 
@@ -267,6 +271,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _initLocation();
+      
+      // Bắt đầu lắng nghe thay đổi GPS thời gian thực sau khi khởi tạo xong
+      _serviceStatusStreamSubscription = Geolocator.getServiceStatusStream().listen((ServiceStatus status) {
+        if (status == ServiceStatus.disabled) {
+          if (!_isGpsDialogShowing) _showGpsBlockingDialog();
+        } else if (status == ServiceStatus.enabled) {
+          if (_isGpsDialogShowing) {
+            Navigator.of(context, rootNavigator: true).pop();
+            _isGpsDialogShowing = false;
+          }
+        }
+      });
+
       bool isGranted = await platform.invokeMethod('checkMockPermission');
       if (!isGranted) {
         _showMockPermissionDialog();
@@ -276,7 +293,57 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  // CÁC HÀM HELPER XỬ LÝ TÊN VÀ MÀU SẮC ĐIỂM
+  // --- HÀM KHÓA MÀN HÌNH NẾU TẮT GPS ĐỘT NGỘT ---
+  void _showGpsBlockingDialog() {
+    if (!mounted) return;
+    _isGpsDialogShowing = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text("Mất Kết Nối GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          content: const Text("Bạn vừa tắt Dịch vụ vị trí (GPS).\n\nỨng dụng bắt buộc phải bật GPS để lấy mốc tính toán tọa độ chính xác. Vui lòng bật lại GPS để tiếp tục.", textAlign: TextAlign.center),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+              onPressed: () async {
+                await Geolocator.openLocationSettings();
+              },
+              child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            TextButton(
+              onPressed: () async {
+                bool enabled = await Geolocator.isLocationServiceEnabled();
+                if (enabled) {
+                  Navigator.pop(ctx);
+                  _isGpsDialogShowing = false;
+                } else {
+                  _showMsg("Bạn chưa bật GPS!");
+                }
+              },
+              child: const Text("Đã bật lại"),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- HÀM KIỂM TRA LẠI GPS KHI APP MỞ LẠI ---
+  Future<void> _checkGpsOnResume() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled && !_isGpsDialogShowing) {
+       _showGpsBlockingDialog();
+    } else if (serviceEnabled && _isGpsDialogShowing) {
+       Navigator.of(context, rootNavigator: true).pop();
+       _isGpsDialogShowing = false;
+    }
+  }
+
   String _getBeaconName(int index) {
     if (index < 3) return "Mốc ${index + 1}";
     return "Mục tiêu ${index - 2}";
@@ -288,7 +355,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Color _getBeaconColor(int index, Color originalColor) {
-    if (index < 3) return Colors.blueGrey.shade800; // Màu tối cho 3 mốc đầu
+    if (index < 3) return Colors.blueGrey.shade800; 
     return originalColor;
   }
 
@@ -313,6 +380,21 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const Text("🚀 CÁCH TÌM VỊ TRÍ TRÊN HEESAY:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.redAccent)),
+                const SizedBox(height: 8),
+                const Text(
+                  "1️⃣ Bấm dấu (+) để tạo Mốc 1.\n\n"
+                  "2️⃣ Vào ứng dụng HeeSay xem khoảng cách của người cần tìm (VD: 5,2km) thì quay lại ứng dụng này nhập vào Mốc 1 là 5.2 và chọn đúng đơn vị đo là km. Nhập xong bấm tiếp dấu (+) để tạo mốc 2.\n\n"
+                  "3️⃣ Quay lại HeeSay, nếu đang xem hồ sơ của họ thì bấm vào nhắn tin, nếu đang nhắn tin thì bấm vào xem hồ sơ để cập nhật khoảng cách thay đổi (VD thay đổi thành 3,6km) xong quay lại ứng dụng này nhập đúng khoảng cách mới vào Mốc 2.\n\n"
+                  "4️⃣ Tiếp tục bấm (+) để tạo Mốc 3 rồi quay lại ứng dụng HeeSay để xem khoảng cách mới. Vào lại ứng dụng này nhập khoảng cách mới vào Mốc 3 (nhớ chọn đúng đơn vị đo m, km, ...).\n\n"
+                  "5️⃣ Tiếp tục bấm (+) để tạo Mục tiêu 1. Khi tạo được mục tiêu 1 thì đã biết được vị trí của người dùng cần tìm, có hiển thị văn bản tọa độ và địa chỉ, bấm vào icon map để xem trực quan vị trí đó trên bản đồ google maps. (Lưu ý, khi này vị trí chưa hoàn toàn chính xác có thể lệch vài chục mét đến vài trăm mét..).\n\n"
+                  "6️⃣ Nhập khoảng cách của Mục tiêu 1 và tiếp tục lặp lại: Bấm (+) để tạo thêm các Mục tiêu mới và nhập khoảng cách mới liên tục cho tới khi HeeSay báo 0m (hoặc 0ft). Đó chính là vị trí chính xác cần tìm! 🎉",
+                  style: TextStyle(fontSize: 13, height: 1.4, color: Colors.black87)
+                ),
+                const SizedBox(height: 15),
+                const Divider(thickness: 1.5),
+                const SizedBox(height: 10),
+
                 const Text("Các nút công cụ chính:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
                 const SizedBox(height: 10),
                 _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo (HeeSay, Grindr...). Bấm để bật/tắt nút cửa sổ nổi chuyển App nhanh."),
@@ -325,20 +407,36 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 _buildInstructionRow(Icons.save, Colors.blue, "Lưu lại tọa độ của mục tiêu vào danh sách để sử dụng lại sau."),
                 _buildInstructionRow(Icons.search, Colors.blue, "Tìm kiếm địa danh hoặc dán trực tiếp tọa độ để di chuyển đến."),
                 _buildInstructionRow(Icons.list, Colors.purple, "Mở danh sách các vị trí bạn đã lưu để xem lại hoặc dẫn đường."),
+                const SizedBox(height: 15),
+                const Divider(),
+                
+                const Text("Tải App HeeSay Mod:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.purple)),
+                const SizedBox(height: 4),
+                const Text("(Cho phép chụp và quay video màn hình tin nhắn, ảnh tự xóa, cuộc gọi video... mà không bị chặn)", style: TextStyle(fontSize: 13, color: Colors.black87, fontStyle: FontStyle.italic)),
                 const SizedBox(height: 10),
-                const Text("Nguyên lý đo tọa độ:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
-                const Padding(
-                  padding: EdgeInsets.only(left: 8.0, top: 4.0),
-                  child: Text(
-                    "- Tạo các Mốc đo và nhập khoảng cách để tính toán ra vị trí Mục tiêu (tọa độ cần tìm).\n"
-                    "- Nếu Mục tiêu tính được đo trên app đích vẫn chưa là 0m, hãy tiếp tục nhập khoảng cách đó và thêm Mục tiêu mới để app tính lại.\n"
-                    "- Lặp lại cho tới khi thấy khoảng cách báo 0m - đó chính là tọa độ chính xác của mục tiêu cần tìm.\n"
-                    "- App tự động cách ly và xóa những điểm bị nhập sai số quá lớn.", 
-                    style: TextStyle(fontSize: 13, height: 1.4)
+                Center(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purple,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.download, size: 22),
+                    label: const Text("Tải HeeSay Mod tại đây", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    onPressed: () async {
+                      final Uri url = Uri.parse('https://www.dropbox.com/scl/fi/pnxwos2879nf1qybqudr9/HeeSay-Blued-mod.apk?rlkey=hxd9t0vnglreza2d2wler161n&st=9cdryrs6&dl=1'); 
+                      try {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } catch (e) {
+                         _showMsg("Không thể mở link tải app");
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(height: 15),
                 const Divider(),
+
                 const Text("Hỗ trợ trực tuyến:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
                 const SizedBox(height: 10),
                 Center(
@@ -489,8 +587,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     )..show(context: context);
   }
 
-  void _showMockPermissionDialog() {
+  Future<void> _showMockPermissionDialog() async {
     if (_isMockDialogShowing) return;
+    
+    bool devEnabled = false;
+    try {
+      devEnabled = await platform.invokeMethod('checkDevOptionsStatus') ?? false;
+    } catch (e) {}
+
     _isMockDialogShowing = true;
 
     showDialog(
@@ -511,20 +615,29 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  "Cách bật Tùy chọn nhà phát triển (nếu chưa có):",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  "Vào Cài đặt máy -> Giới thiệu điện thoại -> Nhấn liên tục 7 lần vào 'Số hiệu bản tạo' (hoặc 'Phiên bản MIUI/OS').",
-                  style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
                 
-                // NÚT CHÍNH ĐƯỢC ĐƯA LÊN TRÊN ĐÂY
+                if (!devEnabled) ...[
+                  const Text(
+                    "Máy của bạn CHƯA BẬT Tùy chọn nhà phát triển:",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    "Vào Cài đặt máy -> Giới thiệu điện thoại -> Nhấn liên tục 7 lần vào 'Số hiệu bản tạo' (hoặc 'Phiên bản MIUI/OS', 'Số bản dựng').",
+                    style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                ] else ...[
+                   const Text(
+                    "Máy của bạn ĐÃ BẬT Tùy chọn nhà phát triển.\nHãy bấm nút bên dưới và tìm mục ứng dụng vị trí mô phỏng nhé.",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.green),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -540,15 +653,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         _showMsg("Lỗi: Không thể tự động mở. Vui lòng mở thủ công trong Cài đặt.");
                       }
                     },
-                    child: const Text("Tới Cài Đặt Ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                    child: Text(
+                      devEnabled ? "Tới Tùy Chọn Nhà Phát Triển" : "Tới Giới Thiệu Điện Thoại", 
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)
+                    ),
                   ),
                 ),
 
                 const SizedBox(height: 16),
-                const Divider(), // KẺ NGANG
+                const Divider(), 
                 const SizedBox(height: 8),
                 
-                // PHẦN PHỤ HỖ TRỢ ZALO Ở DƯỚI
                 const Text(
                   "Cần hỗ trợ trực tiếp?",
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
@@ -592,6 +707,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         _checkAndShowTutorial();
       } else {
         _stopMock();
+        if (_isMockDialogShowing) {
+           Navigator.of(context, rootNavigator: true).pop(); 
+           _isMockDialogShowing = false;
+        }
         _showMockPermissionDialog();
       }
     } catch (e) {}
@@ -657,7 +776,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Bạn đã hết 50 lượt dùng thử.\nQuét mã QR dưới đây để thanh toán nâng cấp PRO:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
+                const Text("Bạn đã hết 100 lượt dùng thử.\nQuét mã QR dưới đây để thanh toán nâng cấp PRO:", textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 15),
                 Screenshot(
                   controller: _screenshotController,
@@ -733,6 +852,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _serviceStatusStreamSubscription?.cancel();
     _mapController.dispose();
     _searchCtrl.dispose();
     for (var b in beacons) b.dispose();
@@ -749,6 +869,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     } else if (state == AppLifecycleState.resumed) {
       _checkMockOnResume();
+      _checkGpsOnResume();
 
       if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -1100,7 +1221,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return totalError;
   }
 
-  // Hàm tính điểm Best Fit (chính xác) dành cho 3 điểm trở lên
   LatLng? _calculateBestFit(List<Beacon> validBeacons) {
     if (validBeacons.length < 2) return null;
 
@@ -1153,7 +1273,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return _optimizePoint(bestStartNode, validBeacons);
   }
 
-  // HÀM MỚI: Tự động phát hiện và xóa điểm bị sai số
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
@@ -1313,7 +1432,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } catch (e) { _showMsg("Lỗi"); }
   }
 
-  // --- HÀM REFRESH PHÂN TÁCH LOGIC CHO TRƯỜNG HỢP < 3 ĐIỂM VÀ >= 3 ĐIỂM ---
   Future<void> _resetCurrentBeacon() async {
     if (selectedIndex == null) {
       _showMsg("Chưa chọn điểm nào để tính lại!");
@@ -1490,24 +1608,34 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (!mounted) return;
+        _isGpsDialogShowing = true;
         await showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            title: const Text("Yêu cầu bật GPS"),
-            content: const Text("Ứng dụng cần bạn bật Dịch vụ vị trí (GPS) để có thể hiển thị bản đồ ở vị trí hiện tại."),
-            actions: [
-              TextButton(
-                onPressed: () => Geolocator.openLocationSettings(),
-                child: const Text("Mở Cài đặt"),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Đã bật, tiếp tục"),
-              )
-            ],
+          builder: (ctx) => PopScope(
+            canPop: false, 
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              title: const Text("Bắt Buộc Bật GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              content: const Text("Ứng dụng cần bạn bật Dịch vụ vị trí (GPS) để có thể định vị bản đồ và tính toán tọa độ.\n\nVui lòng bật GPS để có thể tiếp tục sử dụng app.", textAlign: TextAlign.center),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  onPressed: () async {
+                    await Geolocator.openLocationSettings();
+                  },
+                  child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Đã bật, thử lại"),
+                )
+              ],
+            ),
           )
         );
+        _isGpsDialogShowing = false;
         continue; 
       }
 
@@ -1519,15 +1647,21 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           await showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              title: const Text("Yêu cầu quyền Vị trí"),
-              content: const Text("Bạn cần cấp quyền truy cập vị trí để ứng dụng định vị bản đồ."),
-              actions: [
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text("Đồng ý"),
-                )
-              ],
+            builder: (ctx) => PopScope(
+              canPop: false, 
+              child: AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                title: const Text("Bắt Buộc Cấp Quyền", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                content: const Text("Bạn cần cấp quyền truy cập vị trí thì ứng dụng mới lấy được tọa độ hiện tại của bạn để làm Mốc tính toán.", textAlign: TextAlign.center),
+                actionsAlignment: MainAxisAlignment.center,
+                actions: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    onPressed: () => Navigator.pop(ctx), 
+                    child: const Text("Cấp quyền ngay", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  )
+                ],
+              ),
             )
           );
           continue; 
@@ -1539,19 +1673,27 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         await showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            title: const Text("Quyền Vị trí bị từ chối"),
-            content: const Text("Bạn đã từ chối quyền vị trí. Vui lòng vào Cài đặt ứng dụng -> Quyền -> Bật Vị trí để tiếp tục."),
-            actions: [
-              TextButton(
-                onPressed: () => Geolocator.openAppSettings(),
-                child: const Text("Mở Cài đặt App"),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Đã cấp quyền"),
-              )
-            ],
+          builder: (ctx) => PopScope(
+            canPop: false,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              title: const Text("Quyền Vị Trí Bị Chặn", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              content: const Text("Bạn đã từ từ chối quyền vị trí vĩnh viễn.\n\nVui lòng nhấn vào nút bên dưới để mở Cài đặt ứng dụng -> Chọn 'Quyền' -> Cấp quyền 'Vị trí' để có thể dùng app.", textAlign: TextAlign.center),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  onPressed: () async {
+                    await Geolocator.openAppSettings();
+                  },
+                  child: const Text("Mở Cài đặt App", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Đã cấp quyền, thử lại"),
+                )
+              ],
+            ),
           )
         );
         continue;
@@ -1636,7 +1778,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  // HÀM MỚI: Hiển thị thông báo ở trên cùng màn hình
   void _showMsg(String m) {
     ScaffoldMessenger.of(context).clearSnackBars(); 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1644,12 +1785,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         content: Text(
           m, 
           textAlign: TextAlign.center, 
-          style: const TextStyle(color: Colors.white, fontSize: 13) // Đã bỏ in đậm
+          style: const TextStyle(color: Colors.white, fontSize: 13) 
         ),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.black.withOpacity(0.7), // Bớt đen đặc
-        elevation: 2, // Giảm độ nổi bóng
+        backgroundColor: Colors.black.withOpacity(0.7), 
+        elevation: 2, 
         margin: EdgeInsets.only(
           bottom: MediaQuery.of(context).size.height * 0.8, 
           left: 20,
@@ -2027,7 +2168,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
-                      // NÚT HƯỚNG DẪN Ở GÓC TRÊN CÙNG BÊN PHẢI
                       Container(
                         margin: const EdgeInsets.only(left: 4, top: 2),
                         child: ElevatedButton.icon(
@@ -2119,7 +2259,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     ),
                   ),
 
-                  // THANH CÔNG CỤ CỐ ĐỊNH, DÙNG VISIBILITY ĐỂ ẨN NHƯNG GIỮ CHỖ
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 5),
@@ -2130,7 +2269,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Nút 1: Add (Luôn hiện và đứng im)
                             IconButton(
                               key: _addBeaconKey,
                               padding: EdgeInsets.zero, constraints: const BoxConstraints(),
@@ -2139,7 +2277,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
                             
-                            // Nút 2: Delete
                             Visibility(
                               visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2163,7 +2300,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
                             
-                            // Nút 3: Restart as Mốc 1
                             Visibility(
                               visible: targetPoints.isNotEmpty || selectedIndex != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2175,7 +2311,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
 
-                            // Nút 5: Refresh
                             Visibility(
                               visible: selectedIndex != null, 
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2187,7 +2322,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
 
-                            // Nút 6: Map
                             Visibility(
                               visible: targetPoints.isNotEmpty || selectedIndex != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2211,7 +2345,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
 
-                            // Nút 7: Play/Stop
                             Visibility(
                               visible: targetPoints.isNotEmpty || selectedIndex != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2229,7 +2362,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
 
-                            // Nút 8: Save
                             Visibility(
                               visible: targetPoints.isNotEmpty || selectedIndex != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2371,4 +2503,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} // ok
+}
