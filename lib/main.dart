@@ -223,13 +223,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool _isTutorialShowing = false;
   bool _isMockDialogShowing = false; 
 
-  // --- THÊM BIẾN KIỂM SOÁT BẬT/TẮT GPS ---
   StreamSubscription<ServiceStatus>? _serviceStatusStreamSubscription;
   bool _isGpsDialogShowing = false;
 
   bool isPro = false;
   int trialCount = 0;
-  final int maxTrial = 100; // ĐÃ TĂNG LÊN 100
+  final int maxTrial = 100;
   bool allowTrialFromServer = true; 
   String? deviceId;
 
@@ -272,7 +271,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _initLocation();
       
-      // Bắt đầu lắng nghe thay đổi GPS thời gian thực sau khi khởi tạo xong
       _serviceStatusStreamSubscription = Geolocator.getServiceStatusStream().listen((ServiceStatus status) {
         if (status == ServiceStatus.disabled) {
           if (!_isGpsDialogShowing) _showGpsBlockingDialog();
@@ -293,7 +291,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  // --- HÀM KHÓA MÀN HÌNH NẾU TẮT GPS ĐỘT NGỘT ---
   void _showGpsBlockingDialog() {
     if (!mounted) return;
     _isGpsDialogShowing = true;
@@ -333,7 +330,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  // --- HÀM KIỂM TRA LẠI GPS KHI APP MỞ LẠI ---
   Future<void> _checkGpsOnResume() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled && !_isGpsDialogShowing) {
@@ -380,7 +376,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("🚀 CÁCH TÌM VỊ TRÍ TRÊN HEESAY:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.redAccent)),
+                const Text("🚀 CÁCH TÌM VỊ TRÊN HEESAY:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.redAccent)),
                 const SizedBox(height: 8),
                 const Text(
                   "1️⃣ Bấm dấu (+) để tạo Mốc 1.\n\n"
@@ -969,11 +965,62 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
+  void _showAppLinkOptions() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Tùy chọn App liên kết", style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.swap_horiz, color: Colors.blue),
+              title: const Text("Đổi App liên kết"),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickTargetApp();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_off, color: Colors.red),
+              title: const Text("Hủy liên kết App", style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                setState(() {
+                  targetAppPackage = null;
+                });
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('target_app_package');
+                if (await FlutterOverlayWindow.isActive()) {
+                  await FlutterOverlayWindow.closeOverlay();
+                }
+                _showMsg("Đã xóa liên kết App và tắt nút nổi!");
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickTargetApp() async {
     _showMsg("Đang quét danh sách ứng dụng...");
     try {
       List<AppInfo> apps = await InstalledApps.getInstalledApps();
-      apps.sort((a, b) => (a.name ?? "").toLowerCase().compareTo((b.name ?? "").toLowerCase()));
+      
+      apps.sort((a, b) {
+        String nameA = (a.name ?? "").toLowerCase();
+        String nameB = (b.name ?? "").toLowerCase();
+        
+        bool isHeeSayA = nameA.contains("heesay");
+        bool isHeeSayB = nameB.contains("heesay");
+        
+        if (isHeeSayA && !isHeeSayB) return -1;
+        if (!isHeeSayA && isHeeSayB) return 1;
+        
+        return nameA.compareTo(nameB);
+      });
+
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -2234,7 +2281,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           children: [
                             InkWell(
                               key: _linkAppKey, 
-                              onLongPress: _pickTargetApp, 
+                              onLongPress: targetAppPackage == null ? _pickTargetApp : _showAppLinkOptions, 
                               onTap: _triggerOverlay,
                               borderRadius: BorderRadius.circular(20),
                               child: Padding(
@@ -2283,7 +2330,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               child: IconButton(
                                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
                                 icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 32), 
-                                onPressed: () {
+                                onPressed: () async {
                                   setState(() { 
                                     beacons = []; 
                                     targetPoints.clear(); 
@@ -2295,6 +2342,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   });
                                   _stopMock();
                                   _zoomToFitAll();
+                                  if (await FlutterOverlayWindow.isActive()) {
+                                    await FlutterOverlayWindow.closeOverlay();
+                                  }
                                 }
                               ),
                             ),
@@ -2503,4 +2553,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} ////
