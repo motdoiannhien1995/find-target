@@ -355,6 +355,31 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return originalColor;
   }
 
+  // --- HÀM TẠO CHÚ THÍCH ĐỘNG (ĐÃ CẬP NHẬT THEO ĐÚNG Ý BẠN) ---
+  String _getDynamicHint() {
+    if (beacons.isEmpty) {
+      return "Bấm (+) để bắt đầu tạo Mốc 1 tìm mục tiêu.";
+    }
+
+    Beacon lastBeacon = beacons.last;
+    double? dist = double.tryParse(lastBeacon.controller.text.replaceAll(',', '.'));
+
+    if (beacons.length > 3) {
+      // Đang ở giai đoạn Mục tiêu
+      return "Nếu khoảng cách tới mục tiêu thật chưa bằng 0 thì nhập khoảng cách và bấm (+) để tạo ${_getBeaconName(beacons.length)}.";
+    } else {
+      // Đang ở giai đoạn Mốc (Mốc 1, 2, 3)
+      if (dist == null || dist <= 0) {
+        return "Nhập khoảng cách đo được từ ${_getBeaconName(beacons.length - 1)} đến mục tiêu thật.";
+      } else {
+        if (beacons.length == 3) {
+          return "Bấm tiếp dấu (+) để tạo ${_getBeaconName(beacons.length)}.";
+        }
+        return "Bấm tiếp dấu (+) để tạo ${_getBeaconName(beacons.length)} để tìm mục tiêu.";
+      }
+    }
+  }
+
   void _showInstructionBoard() {
     showDialog(
       context: context,
@@ -2198,6 +2223,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                       onTap: () {
                                         setState(() {});
                                       },
+                                      onChanged: (val) {
+                                        setState(() {});
+                                      },
                                       decoration: InputDecoration(
                                         isDense: true,
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -2536,6 +2564,42 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                       ],
                     ),
                   
+                  if (!_isLoadingLocation && !isSearchVisible)
+                    Positioned(
+                      top: 15,
+                      left: 15,
+                      right: 15,
+                      child: IgnorePointer(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: Container(
+                            key: ValueKey<String>(_getDynamicHint()),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.blueAccent.withOpacity(0.5), width: 1.5),
+                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 5)],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.tips_and_updates, color: Colors.yellow, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _getDynamicHint(),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  
                   if (!_isLoadingLocation && isSearchVisible)
                     Positioned(top: 10, left: 15, right: 15, child: Container(decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30)), child: TextField(controller: _searchCtrl, autofocus: true, decoration: InputDecoration(hintText: "Tìm kiếm...", border: InputBorder.none, prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => isSearchVisible = false))), onSubmitted: (_) => _searchLocation()))),
                   
@@ -2553,4 +2617,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} ////
+}
