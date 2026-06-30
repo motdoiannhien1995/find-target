@@ -242,8 +242,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   int? selectedIndex; 
   List<LatLng> targetPoints = [];
-  LatLng? myRealLocation;
-  LatLng? searchMarker; 
+  LatLng? myRealLocation = const LatLng(21.028511, 105.804817); // Mặc định hiển thị trước 1 vị trí để không phải chờ
+  LatLng? searchMarker;
   
   String coordDisplay = "0.000000, 0.000000";
   String addressDisplay = "Chưa có vị trí";
@@ -253,7 +253,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool isSearchVisible = false;
   String? targetAppPackage; 
   
-  bool _isLoadingLocation = true; 
+  bool _isLoadingLocation = false;
 
   static const double earthRadius = 6371000.0;
   
@@ -1879,6 +1879,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         myRealLocation = current;
         _isLoadingLocation = false; 
       });
+      // Tự động kéo bản đồ về vị trí thật sau khi GPS load xong dưới nền
+      if (selectedIndex == null && targetPoints.isEmpty) {
+        _mapController.move(current, 15);
+      }
     }
 
     Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5))
