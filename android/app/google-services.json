@@ -7,12 +7,78 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:539414765425:android:0bcdc584bc5a99cd2560d0",
+        "android_client_info": {
+          "package_name": "com.example.x_remote_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJnpye19zI2KO4KQYxpJYkoHT11zM2298"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:539414765425:android:620e38343a23bd212560d0",
         "android_client_info": {
           "package_name": "com.khoa.fakegpstracetarget"
         }
       },
       "oauth_client": [
+        {
+          "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJnpye19zI2KO4KQYxpJYkoHT11zM2298"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:539414765425:android:8b988fc49370258b2560d0",
+        "android_client_info": {
+          "package_name": "com.khoa.findtarget"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "539414765425-32uvsgg2uie9e1umrav3h1af5mk8frp6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.khoa.findtarget",
+            "certificate_hash": "ce51d2c2f6e749db27fca24cdf89c979f28ae80a"
+          }
+        },
         {
           "client_id": "539414765425-n7uja6rih58kio2pajqivn3m128jmu0s.apps.googleusercontent.com",
           "client_type": 3
@@ -56,6 +122,14 @@
           "android_info": {
             "package_name": "com.khoa.kindr",
             "certificate_hash": "10f5c1d5bd9fb0605badcb1d6d3d32c31f641243"
+          }
+        },
+        {
+          "client_id": "539414765425-r9jngsc66f0l5q860h1gjvstvh3ts94c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.khoa.kindr",
+            "certificate_hash": "8af162e73f9c76864da59b8481f0c6ceec05c286"
           }
         },
         {

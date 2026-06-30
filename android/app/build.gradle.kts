@@ -16,8 +16,8 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    // Tên gói mới của bạn: com.khoa.trilaterat
-    namespace = "com.khoa.trilaterat"
+    // Tên gói mới của bạn: com.khoa.findtarget
+    namespace = "com.khoa.findtarget"
     // Yêu cầu SDK 36 để tương thích với các thư viện mới nhất
     compileSdk = 36 
 
@@ -43,7 +43,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.khoa.trilaterat"
+        applicationId = "com.khoa.findtarget"
         minSdk = flutter.minSdkVersion 
         targetSdk = 36
         versionCode = flutter.versionCode

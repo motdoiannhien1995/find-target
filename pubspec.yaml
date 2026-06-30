@@ -1,4 +1,4 @@
-name: trilaterat_tool
+name: find_target
 description: "App xác định tọa độ bằng hình học Trilateration."
 publish_to: 'none'
 version: 1.0.0+4

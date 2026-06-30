@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.khoa.trilaterat">
+    package="com.khoa.findtarget">
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
@@ -17,7 +17,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
-        android:label="Trilaterat Tool"
+        android:label="Find Target"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         
