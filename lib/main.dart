@@ -100,17 +100,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 
   Future<void> _launchApp(String pkg) async {
+    // Tầng 1: Intent Tàng Hình (Bỏ LAUNCHER, Dùng REORDER_TO_FRONT) - Không làm mới khung chat
+    try {
+      final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$pkg;launchFlags=0x10020000;end");
+      if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
+    } catch (e) {}
+
+    // Tầng 2: Giả lập chạm từ Màn hình Đa Nhiệm (LAUNCHED_FROM_HISTORY)
+    try {
+      final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$pkg;launchFlags=0x10100000;end");
+      if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
+    } catch (e) {}
+
+    // Tầng 3: Phương án dự phòng cuối cùng (Chấp nhận bị Android ép reset nếu 2 cách trên máy không hỗ trợ)
     try {
       bool? success = await InstalledApps.startApp(pkg);
       if (success == true) return; 
-    } catch (e) {
-      print("Cách 1 lỗi");
-    }
-
-    try {
-      final Uri uri = Uri.parse(
-          "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10200000;package=$pkg;end");
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
       if (mounted) setState(() => _bgColor = Colors.red);
     }
@@ -265,8 +270,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool _isMockDialogShowing = false; 
 
   StreamSubscription<ServiceStatus>? _serviceStatusStreamSubscription;
+  
   bool _isGpsDialogShowing = false;
   bool _isOverlayActive = false; 
+  bool _autoShowOverlay = true; // Trạng thái kiểm soát việc có tự động hiện nút nổi hay không
 
   bool isPro = false;
   int trialCount = 0;
@@ -444,8 +451,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                 const Text("Các nút công cụ chính:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
                 const SizedBox(height: 10),
-                _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo. Bấm để bật/tắt nút cửa sổ nổi chuyển App nhanh. BẤM ĐÚP CỬA SỔ NỔI ĐỂ TÀNG HÌNH.\nNHẤN GIỮ NÚT NỔI ĐỂ TẮT."),
-                _buildInstructionRow(Icons.rocket_launch, Colors.deepPurple, "Nhấn giữ để chọn App phụ. Bấm để chuyển nhanh sang App phụ đó."),
+                _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo. Bấm để BẬT/TẮT tính năng tự động hiện nút nổi. Khi nút xanh lá là đang bật.\nBẤM ĐÚP CỬA SỔ NỔI ĐỂ TÀNG HÌNH."),
+                _buildInstructionRow(Icons.rocket_launch, Colors.blueAccent, "Nhấn giữ để chọn App phụ. Bấm để chuyển nhanh sang App phụ đó."),
                 _buildInstructionRow(Icons.content_paste_go, Colors.blue, "Nút dán. Nếu bạn copy tọa độ, bấm vào đây app sẽ nhảy thẳng vị trí đó luôn."),
                 _buildInstructionRow(Icons.looks_one, Colors.teal, "Lấy tọa độ đang chạy gán vào Mốc 1 mới để tiếp tục dò đường."),
                 _buildInstructionRow(Icons.refresh, Colors.orange, "Bấm nút này để Đảo chiều K1, K2. Sẽ tự động nhảy app."),
@@ -810,23 +817,35 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _switchToTargetApp() async {
-    if (!_isOverlayActive) return; 
     if (targetAppPackage == null || targetAppPackage!.isEmpty) return;
     
-    FlutterOverlayWindow.shareData('to_target');
+    if (_isOverlayActive) {
+      FlutterOverlayWindow.shareData('to_target');
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('overlay_is_returning', true);
 
     await Future.delayed(const Duration(milliseconds: 300)); 
+    
+    // Tầng 1: Intent Tàng Hình (Cố tình bỏ ACTION_MAIN và CATEGORY_LAUNCHER) 
+    // Ép Android đưa Task cũ lên mà không chạy lại chu trình mở app
     try {
-      bool? success = await InstalledApps.startApp(targetAppPackage!);
-      if (success != true) {
-         final Uri uri = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10200000;package=$targetAppPackage;end");
-         await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
+      final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
+      if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
+    } catch (e) {}
+
+    // Tầng 2: Giả lập mở từ màn hình Recent Apps (Đa nhiệm)
+    try {
+      final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$targetAppPackage;launchFlags=0x10100000;end");
+      if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
+    } catch (e) {}
+    
+    // Tầng 3: Nếu máy chặn cả 2 cách trên, đành dùng cách mặc định
+    try {
+       await InstalledApps.startApp(targetAppPackage!);
     } catch (e) {
-      print("Lỗi chuyển app tự động: $e");
+       print("Lỗi chuyển app: $e");
     }
   }
 
@@ -1038,7 +1057,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     await _saveTargetApp(app.packageName!);
                     Navigator.pop(ctx);
                     _showMsg("Đã liên kết: ${app.name}");
-                    _showInvincibleOverlay(); 
+                    if (_autoShowOverlay) {
+                      _showInvincibleOverlay(); 
+                    }
                   },
                 );
               },
@@ -1134,16 +1155,25 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       return;
     }
 
-    bool isActive = await FlutterOverlayWindow.isActive();
-    if (isActive) {
-      await FlutterOverlayWindow.closeOverlay();
-      setState(() => _isOverlayActive = false);
-      _showMsg("Đã tắt nút nổi");
-    } else {
+    setState(() {
+      _autoShowOverlay = !_autoShowOverlay;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('auto_show_overlay', _autoShowOverlay);
+
+    if (_autoShowOverlay) {
       await _showInvincibleOverlay();
       FlutterOverlayWindow.shareData('show'); 
       setState(() => _isOverlayActive = true);
-      _showMsg("Đã bật nút nổi");
+      _showMsg("Đã BẬT tự động hiện nút nổi");
+    } else {
+      bool isActive = await FlutterOverlayWindow.isActive();
+      if (isActive) {
+        await FlutterOverlayWindow.closeOverlay();
+        setState(() => _isOverlayActive = false);
+      }
+      _showMsg("Đã TẮT tự động hiện nút nổi");
     }
   }
 
@@ -1198,8 +1228,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
     
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
-      if (_isOverlayActive) {
-         FlutterOverlayWindow.shareData('show');
+      if (_autoShowOverlay) {
+        if (!_isOverlayActive) {
+           await _showInvincibleOverlay();
+        } else {
+           FlutterOverlayWindow.shareData('show');
+        }
       }
     }
     
@@ -1286,7 +1320,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return [k1, k2];
   }
 
-  // ĐÃ LOẠI BỎ HOÀN TOÀN CƠ CHẾ LỌC VÀ XÓA MỐC TỰ ĐỘNG
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
@@ -1732,6 +1765,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     
     String? secondPkg = prefs.getString('second_target_app_package');
     if (secondPkg != null) setState(() => secondTargetAppPackage = secondPkg);
+
+    bool? autoOverlay = prefs.getBool('auto_show_overlay');
+    if (autoOverlay != null) setState(() => _autoShowOverlay = autoOverlay);
   }
 
   Future<void> _initLocation() async {
@@ -2470,12 +2506,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   _pickSecondTargetApp();
                                 } else {
                                   try {
-                                    bool? success = await InstalledApps.startApp(secondTargetAppPackage!);
-                                    if (success != true) {
-                                       final Uri uri = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10200000;package=$secondTargetAppPackage;end");
-                                       await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                    }
-                                  } catch (e) {
+                                    final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$secondTargetAppPackage;launchFlags=0x10020000;end");
+                                    if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
+                                  } catch (e) {}
+                                  try {
+                                    final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$secondTargetAppPackage;launchFlags=0x10100000;end");
+                                    if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
+                                  } catch (e) {}
+                                  try {
+                                    await InstalledApps.startApp(secondTargetAppPackage!);
+                                  } catch (err) {
                                     _showMsg("Lỗi mở App phụ");
                                   }
                                 }
@@ -2485,7 +2525,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                 padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
                                 child: Icon(
                                   Icons.rocket_launch, 
-                                  color: secondTargetAppPackage == null ? Colors.grey : Colors.deepPurple, 
+                                  color: secondTargetAppPackage == null ? Colors.grey : Colors.blueAccent, 
                                   size: 26
                                 ),
                               ),
@@ -2520,6 +2560,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 8),
 
+                            // Nút Công tắc bật/tắt tự động hiện nút nổi
                             InkWell(
                               key: _linkAppKey, 
                               onLongPress: targetAppPackage == null ? _pickTargetApp : _showAppLinkOptions, 
@@ -2531,7 +2572,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   Icons.layers, 
                                   color: targetAppPackage == null 
                                       ? Colors.grey 
-                                      : (_isOverlayActive ? Colors.green : Colors.blueAccent), 
+                                      : (_autoShowOverlay ? Colors.green : Colors.blueAccent), // Xanh lá khi BẬT tự động, Xanh dương khi TẮT
                                   size: 26
                                 ),
                               ),
@@ -2591,8 +2632,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
                             
+                            // Nút thùng rác đã khôi phục lại lệnh Tắt Overlay
                             Visibility(
-                              visible: beacons.isNotEmpty || targetPoints.isNotEmpty || searchMarker != null,
+                              visible: (beacons.length > 1 || (beacons.isNotEmpty && (beacons[0].location != null || beacons[0].controller.text.isNotEmpty))) || targetPoints.isNotEmpty || searchMarker != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
                               child: IconButton(
                                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
@@ -2611,6 +2653,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   });
                                   _stopMock();
                                   _zoomToFitAll();
+                                  
+                                  // Khôi phục lại logic đóng nút nổi khi ngừng tính toán
                                   if (await FlutterOverlayWindow.isActive()) {
                                     await FlutterOverlayWindow.closeOverlay();
                                     setState(() => _isOverlayActive = false);
