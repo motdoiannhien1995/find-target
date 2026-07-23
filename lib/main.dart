@@ -50,9 +50,10 @@ class InvincibleOverlay extends StatefulWidget {
 class _InvincibleOverlayState extends State<InvincibleOverlay> {
   final String _myPackage = "com.khoa.findtarget"; 
   String? _targetPackage;
+  String? _secondTargetPackage; 
   
   bool _isReturning = false; 
-  Color _bgColor = Colors.blueAccent;
+  Color _bgColor = Colors.blue.shade800;
   
   double _opacity = 0.4; 
 
@@ -66,13 +67,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       if (event == 'to_target') {
         setState(() {
           _isReturning = true;
-          _bgColor = Colors.green;
+          _bgColor = Colors.green.shade800;
           _opacity = 0.4; 
         });
       } else if (event == 'to_main') {
         setState(() {
           _isReturning = false;
-          _bgColor = Colors.blueAccent;
+          _bgColor = Colors.blue.shade800;
           _opacity = 0.4;
         });
       } else if (event == 'show') {
@@ -87,11 +88,12 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       await prefs.reload(); 
       setState(() {
         _targetPackage = prefs.getString('target_app_package');
+        _secondTargetPackage = prefs.getString('second_target_app_package');
         _isReturning = prefs.getBool('overlay_is_returning') ?? false;
         if (_isReturning) {
-          _bgColor = Colors.green;
+          _bgColor = Colors.green.shade800;
         } else {
-          _bgColor = Colors.blueAccent;
+          _bgColor = Colors.blue.shade800;
         }
       });
     } catch (e) {
@@ -100,24 +102,21 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 
   Future<void> _launchApp(String pkg) async {
-    // Tầng 1: Intent Tàng Hình (Bỏ LAUNCHER, Dùng REORDER_TO_FRONT) - Không làm mới khung chat
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$pkg;launchFlags=0x10020000;end");
       if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
 
-    // Tầng 2: Giả lập chạm từ Màn hình Đa Nhiệm (LAUNCHED_FROM_HISTORY)
     try {
       final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$pkg;launchFlags=0x10100000;end");
       if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
 
-    // Tầng 3: Phương án dự phòng cuối cùng (Chấp nhận bị Android ép reset nếu 2 cách trên máy không hỗ trợ)
     try {
       bool? success = await InstalledApps.startApp(pkg);
       if (success == true) return; 
     } catch (e) {
-      if (mounted) setState(() => _bgColor = Colors.red);
+      if (mounted) setState(() => _bgColor = Colors.red.shade800);
     }
   }
 
@@ -127,30 +126,36 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       color: Colors.transparent,
       child: Center(
         child: Container(
-          width: 65, 
-          height: 65, 
+          width: 100, 
+          height: 100, 
           decoration: BoxDecoration(
             color: _bgColor.withOpacity(_opacity), 
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 1.5), 
-            boxShadow: [BoxShadow(blurRadius: 4, color: Colors.black26.withOpacity(_opacity == 0.0 ? 0.0 : 0.26))], 
+            border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.5), 
+            boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(100),
             
-            onDoubleTap: () {
+            onLongPress: () {
               setState(() {
                 _opacity = _opacity == 0.4 ? 0.0 : 0.4;
               });
             },
 
-            onLongPress: () async {
-              await FlutterOverlayWindow.closeOverlay();
+            onDoubleTap: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.reload();
+              _secondTargetPackage = prefs.getString('second_target_app_package') ?? _secondTargetPackage;
+              
+              if (_secondTargetPackage != null) {
+                await _launchApp(_secondTargetPackage!);
+              }
             },
 
             onTap: () async {
               setState(() {
-                _bgColor = Colors.orange;
+                _bgColor = Colors.deepOrange;
                 _opacity = 0.4; 
               });
 
@@ -162,20 +167,20 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                 if (_isReturning) {
                   setState(() {
                     _isReturning = false;
-                    _bgColor = Colors.blueAccent;
+                    _bgColor = Colors.blue.shade800;
                   });
                   await prefs.setBool('overlay_is_returning', false);
                   await _launchApp(_myPackage);
                 } else {
                   setState(() {
                     _isReturning = true;
-                    _bgColor = Colors.green;
+                    _bgColor = Colors.green.shade800;
                   });
                   await prefs.setBool('overlay_is_returning', true);
                   await _launchApp(_targetPackage!);
                 }
               } else {
-                  if (mounted) setState(() => _bgColor = Colors.grey);
+                  if (mounted) setState(() => _bgColor = Colors.grey.shade800);
               }
             },
 
@@ -273,7 +278,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   
   bool _isGpsDialogShowing = false;
   bool _isOverlayActive = false; 
-  bool _autoShowOverlay = true; // Trạng thái kiểm soát việc có tự động hiện nút nổi hay không
+  bool _autoShowOverlay = true; 
 
   bool isPro = false;
   int trialCount = 0;
@@ -438,7 +443,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 const Text("🚀 CÁCH TÌM VỊ TRÍ CHÍNH XÁC:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.redAccent)),
                 const SizedBox(height: 8),
                 const Text(
-                  "1️⃣ Nhập khoảng cách Mốc 1, gõ phím (-) để chọn nhanh đơn vị MÉT, gõ (Khoảng trắng) để chọn KM. App sẽ tự tạo Mốc và nhảy app.\n\n"
+                  "1️⃣ Nhập khoảng cách Mốc 1, gõ phím (-/k) để chọn nhanh đơn vị KM, gõ (Khoảng trắng/m) để chọn MÉT. App sẽ tự tạo Mốc và nhảy app.\n\n"
+                  "💡 Mẹo mới: Nhập khoảng cách xong gõ thêm dấu phẩy (,) VÀ phím tắt đơn vị để chọn ngay mục tiêu đó làm Mốc 1. Ví dụ: gõ `3.2,-` app sẽ tự động lấy vị trí hiện tại gán lại thành Mốc 1 với khoảng cách 3.2km.\n\n"
                   "2️⃣ Vào ứng dụng mục tiêu xem khoảng cách thì quay lại ứng dụng này nhập vào Mốc tiếp theo.\n\n"
                   "3️⃣ Quay lại ứng dụng mục tiêu để cập nhật khoảng cách thay đổi xong quay lại ứng dụng này nhập tiếp.\n\n"
                   "4️⃣ Khi tạo được mục tiêu 1 thì đã biết được vị trí của người dùng cần tìm, có hiển thị văn bản tọa độ và địa chỉ, bấm vào icon map để xem trực quan vị trí đó trên bản đồ google maps.\n\n"
@@ -451,10 +457,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                 const Text("Các nút công cụ chính:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
                 const SizedBox(height: 10),
-                _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo. Bấm để BẬT/TẮT tính năng tự động hiện nút nổi. Khi nút xanh lá là đang bật.\nBẤM ĐÚP CỬA SỔ NỔI ĐỂ TÀNG HÌNH."),
+                _buildInstructionRow(Icons.layers, Colors.blueAccent, "Nhấn giữ để chọn App mục tiêu đo. Bấm để BẬT/TẮT tính năng tự động hiện nút nổi.\nNHẤN GIỮ CỬA SỔ NỔI ĐỂ TÀNG HÌNH. BẤM ĐÚP ĐỂ VÀO APP TÊN LỬA."),
                 _buildInstructionRow(Icons.rocket_launch, Colors.blueAccent, "Nhấn giữ để chọn App phụ. Bấm để chuyển nhanh sang App phụ đó."),
                 _buildInstructionRow(Icons.content_paste_go, Colors.blue, "Nút dán. Nếu bạn copy tọa độ, bấm vào đây app sẽ nhảy thẳng vị trí đó luôn."),
-                _buildInstructionRow(Icons.looks_one, Colors.teal, "Lấy tọa độ đang chạy gán vào Mốc 1 mới để tiếp tục dò đường."),
+                _buildInstructionRow(Icons.looks_one, Colors.teal, "Lấy tọa độ đang chạy gán vào Mốc 1 mới để tiếp tục dò đường. (Sẽ tự động mang theo khoảng cách vừa nhập)"),
                 _buildInstructionRow(Icons.refresh, Colors.orange, "Bấm nút này để Đảo chiều K1, K2. Sẽ tự động nhảy app."),
                 _buildInstructionRow(Icons.map, Colors.indigo, "Xem tọa độ trên ứng dụng bản đồ khác (Google Maps..)."),
                 _buildInstructionRow(Icons.play_circle, Colors.green, "Bắt đầu/Dừng phát vị trí mô phỏng đến máy."),
@@ -828,20 +834,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
     await Future.delayed(const Duration(milliseconds: 300)); 
     
-    // Tầng 1: Intent Tàng Hình (Cố tình bỏ ACTION_MAIN và CATEGORY_LAUNCHER) 
-    // Ép Android đưa Task cũ lên mà không chạy lại chu trình mở app
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
       if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
 
-    // Tầng 2: Giả lập mở từ màn hình Recent Apps (Đa nhiệm)
     try {
       final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$targetAppPackage;launchFlags=0x10100000;end");
       if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
     
-    // Tầng 3: Nếu máy chặn cả 2 cách trên, đành dùng cách mặc định
     try {
        await InstalledApps.startApp(targetAppPackage!);
     } catch (e) {
@@ -1189,8 +1191,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 90, 
-      width: 90,  
+      height: 110, 
+      width: 110,  
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
@@ -1643,17 +1645,26 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _autoSaveLastTargetBeforeClearing(); 
 
     LatLng? newStart;
-    if (isMockingTarget && targetPoints.isNotEmpty) { newStart = targetPoints[0]; } 
-    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { newStart = beacons[selectedIndex!].location; }
-    else if (targetPoints.isNotEmpty) { newStart = targetPoints[0]; }
+    String distToKeep = "";
+    String unitToKeep = 'km';
+
+    if (isMockingTarget && targetPoints.isNotEmpty) { 
+        newStart = targetPoints[0]; 
+    } 
+    else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { 
+        newStart = beacons[selectedIndex!].location; 
+        distToKeep = beacons[selectedIndex!].controller.text;
+        unitToKeep = beacons[selectedIndex!].unit;
+    }
+    else if (targetPoints.isNotEmpty) { 
+        newStart = targetPoints[0]; 
+    }
 
     if (newStart == null) { _showMsg("Chưa có tọa độ nào để gán!"); return; }
-    
-    String unitP1 = 'km';
 
     setState(() {
-      defaultUnit = 'km'; 
-      beacons = [Beacon(location: newStart, color: Colors.blue, unit: unitP1)];
+      defaultUnit = unitToKeep; 
+      beacons = [Beacon(location: newStart, dist: distToKeep, color: Colors.blue, unit: unitToKeep)];
       targetPoints.clear();
       coordDisplay = "0.000000, 0.000000";
       addressDisplay = "Chưa có vị trí";
@@ -1661,10 +1672,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       selectedIndex = 0; 
       isMockingTarget = false;
     });
-    _requestFocus(0); 
+    
     _mapController.move(newStart, 16);
     _setMock(newStart.latitude, newStart.longitude);
     _showMsg("Đã gán và chạy Mốc 1 mới!");
+
+    if (distToKeep.isNotEmpty) {
+        _addNewBeacon();
+    } else {
+        _requestFocus(0); 
+    }
   }
 
   Future<void> _searchLocation() async {
@@ -2219,6 +2236,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         _showMsg("${_getBeaconName(beacons.length - 1)} chưa hoàn thành!");
         return;
       }
+      
+      String distStr = last.controller.text.trim();
+      if (double.tryParse(distStr) == null) {
+        _showMsg("Sai định dạng số (vd: dư dấu chấm)! Vui lòng sửa lại.");
+        return;
+      }
     }
 
     setState(() {
@@ -2400,30 +2423,61 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         setState(() {});
                                       },
                                       onSubmitted: (val) {
-                                        _addNewBeacon();
+                                        String text = val.toLowerCase().trim();
+                                        bool isRestartP1 = text.contains(',');
+                                        
+                                        String numStr = text.replaceAll(',', '').trim();
+                                        
+                                        if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
+                                            _showMsg("Sai định dạng số (vd: dư dấu chấm)!");
+                                            return;
+                                        }
+                                        
+                                        if (isRestartP1) {
+                                            beacons[i].controller.text = numStr;
+                                            setState(() { selectedIndex = i; });
+                                            _restartWithResultAsP1();
+                                        } else {
+                                            _addNewBeacon();
+                                        }
                                       },
                                       onChanged: (val) {
                                         String text = val.toLowerCase();
                                         
-                                        if (text.contains('-')) {
-                                          String numStr = text.replaceAll('-', '').trim();
-                                          beacons[i].controller.text = numStr;
-                                          beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
-                                          beacons[i].unit = 'km';
-                                          _addNewBeacon();
-                                          return;
-                                        }
+                                        bool hasMinus = text.contains('-');
+                                        bool hasSpace = text.contains(' ');
+                                        bool hasK = text.contains('k');
+                                        bool hasM = text.contains('m');
+                                        bool hasComma = text.contains(',');
 
-                                        if (text.contains(' ')) {
-                                          String numStr = text.replaceAll(' ', '').trim();
-                                          beacons[i].controller.text = numStr;
-                                          beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
-                                          beacons[i].unit = 'm';
-                                          _addNewBeacon();
-                                          return;
-                                        }
+                                        // CHỈ KÍCH HOẠT KHI NHẬP ĐƠN VỊ (- KHOẢNGTRẮNG K M)
+                                        if (hasMinus || hasSpace || hasK || hasM) {
+                                           bool isRestartP1 = hasComma;
+                                           
+                                           String numStr = text.replaceAll(RegExp(r'[- km,]'), '').trim();
+                                           
+                                           if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
+                                              _showMsg("Sai định dạng số (vd: dư dấu chấm)!");
+                                              beacons[i].controller.text = val;
+                                              beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: val.length));
+                                              return; 
+                                           }
 
-                                        setState(() {});
+                                           beacons[i].controller.text = numStr;
+                                           beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
+                                           
+                                           if (hasMinus || hasK) beacons[i].unit = 'km';
+                                           if (hasSpace || hasM) beacons[i].unit = 'm';
+                                           
+                                           if (isRestartP1) {
+                                               setState(() { selectedIndex = i; });
+                                               _restartWithResultAsP1();
+                                           } else {
+                                               if (numStr.isNotEmpty) {
+                                                 _addNewBeacon();
+                                               }
+                                           }
+                                        }
                                       },
                                       decoration: InputDecoration(
                                         isDense: true,
@@ -2560,7 +2614,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 8),
 
-                            // Nút Công tắc bật/tắt tự động hiện nút nổi
                             InkWell(
                               key: _linkAppKey, 
                               onLongPress: targetAppPackage == null ? _pickTargetApp : _showAppLinkOptions, 
@@ -2572,7 +2625,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   Icons.layers, 
                                   color: targetAppPackage == null 
                                       ? Colors.grey 
-                                      : (_autoShowOverlay ? Colors.green : Colors.blueAccent), // Xanh lá khi BẬT tự động, Xanh dương khi TẮT
+                                      : (_autoShowOverlay ? Colors.green : Colors.blueAccent),
                                   size: 26
                                 ),
                               ),
@@ -2632,7 +2685,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 18),
                             
-                            // Nút thùng rác đã khôi phục lại lệnh Tắt Overlay
                             Visibility(
                               visible: (beacons.length > 1 || (beacons.isNotEmpty && (beacons[0].location != null || beacons[0].controller.text.isNotEmpty))) || targetPoints.isNotEmpty || searchMarker != null,
                               maintainSize: true, maintainAnimation: true, maintainState: true,
@@ -2654,7 +2706,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   _stopMock();
                                   _zoomToFitAll();
                                   
-                                  // Khôi phục lại logic đóng nút nổi khi ngừng tính toán
                                   if (await FlutterOverlayWindow.isActive()) {
                                     await FlutterOverlayWindow.closeOverlay();
                                     setState(() => _isOverlayActive = false);
@@ -2814,7 +2865,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   if (!_isLoadingLocation && isSearchVisible)
                     Positioned(top: 10, left: 15, right: 15, child: Container(decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30)), child: TextField(controller: _searchCtrl, autofocus: true, decoration: InputDecoration(hintText: "Tìm kiếm...", border: InputBorder.none, prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(icon: const Icon(Icons.clear), onPressed: () { if (_searchCtrl.text.isEmpty) { setState(() => isSearchVisible = false); } else { _searchCtrl.clear(); } })), onSubmitted: (_) => _searchLocation()))),
                   
-                  // HAI NÚT BẤT DI BẤT DỊCH
                   if (!_isLoadingLocation)
                     Positioned(
                       right: 15, 
