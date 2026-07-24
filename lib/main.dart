@@ -161,7 +161,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       },
       borderRadius: BorderRadius.circular(30),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 12.0),
+        // Căn chỉnh lại padding cho chiều dọc
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 18.0),
         child: Icon(
           icon, 
           color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), 
@@ -179,22 +180,28 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Container(
-            height: 60, 
+            width: 60, // Đổi từ height sang width
             decoration: BoxDecoration(
               color: _bgColor.withOpacity(_opacity), 
               borderRadius: BorderRadius.circular(30),
               border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.0), 
               boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
             ),
-            child: Row(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildButton(Icons.my_location, _myPackage, true),
-                Container(width: 1, height: 30, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
-                _buildButton(Icons.layers, _targetPackage, false),
-                Container(width: 1, height: 30, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
-                _buildButton(Icons.rocket_launch, _secondTargetPackage, false),
+                
+                if (_targetPackage != null && _targetPackage!.isNotEmpty) ...[
+                  Container(width: 30, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                  _buildButton(Icons.layers, _targetPackage, false),
+                ],
+                
+                if (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty) ...[
+                  Container(width: 30, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                  _buildButton(Icons.rocket_launch, _secondTargetPackage, false),
+                ],
               ],
             ),
           ),
@@ -1203,14 +1210,15 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FlutterOverlayWindow.shareData('show'); 
       return;
     }
+    // Đảo ngược khung thành hình chữ nhật đứng
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
       flag: OverlayFlag.defaultFlag, 
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 100, 
-      width: 300,  
+      height: 300, 
+      width: 100,  
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
