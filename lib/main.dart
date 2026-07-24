@@ -832,7 +832,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('overlay_is_returning', true);
 
-    await Future.delayed(const Duration(milliseconds: 300)); 
+    // Tăng delay từ 300ms lên 800ms để đảm bảo OS kịp áp dụng vị trí Mock trên toàn hệ thống 
+    // trước khi màn hình ứng dụng mục tiêu được hiện lên.
+    await Future.delayed(const Duration(milliseconds: 500)); 
     
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
@@ -1447,7 +1449,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  void _assignSavedTargetToP(LatLng location) {
+  Future<void> _assignSavedTargetToP(LatLng location) async {
     int targetIndex = -1;
     String unitToUse = 'km'; 
     if (beacons.isNotEmpty) unitToUse = beacons.last.unit;
@@ -1469,7 +1471,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _mapController.move(location, 17);
     });
     _requestFocus(targetIndex); 
-    _setMock(location.latitude, location.longitude);
+    await _setMock(location.latitude, location.longitude);
     _showMsg("Đang chạy ${_getBeaconName(targetIndex)}");
   }
 
@@ -1536,7 +1538,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         if (myRealLocation == null && index == 0) { myRealLocation = finalPos; }
       });
       _mapController.move(finalPos, 16);
-      _setMock(finalPos.latitude, finalPos.longitude);
+      await _setMock(finalPos.latitude, finalPos.longitude);
     } catch (e) { _showMsg("Lỗi"); }
   }
 
@@ -1609,13 +1611,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
     if (newPos != null) {
       setState(() {
-        beacons[targetIndex].location = newPos;
+        beacons[targetIndex].location = newPos!;
         selectedIndex = targetIndex; 
         targetPoints.clear();
       });
       _requestFocus(targetIndex); 
       _mapController.move(newPos, _mapController.camera.zoom);
-      _setMock(newPos.latitude, newPos.longitude);
+      await _setMock(newPos.latitude, newPos.longitude);
       _zoomToFitAll();
       
       if (!isFixingNext) {
@@ -1624,7 +1626,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          _showMsg("Đã cập nhật lại vị trí ${_getBeaconName(targetIndex)}!");
       }
       
-      _switchToTargetApp(); 
+      await _switchToTargetApp(); 
     } else {
       _showMsg("Không đủ dữ liệu để tính lại! Cần ít nhất 1-2 điểm khác.");
     }
@@ -1665,7 +1667,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
-  void _restartWithResultAsP1() {
+  Future<void> _restartWithResultAsP1() async {
     _autoSaveLastTargetBeforeClearing(); 
 
     LatLng? newStart;
@@ -1698,11 +1700,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
     
     _mapController.move(newStart, 16);
-    _setMock(newStart.latitude, newStart.longitude);
+    await _setMock(newStart.latitude, newStart.longitude);
     _showMsg("Đã gán và chạy Mốc 1 mới!");
 
     if (distToKeep.isNotEmpty) {
-        _addNewBeacon();
+        await _addNewBeacon();
     } else {
         _requestFocus(0); 
     }
@@ -1722,7 +1724,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       
       _mapController.move(pos, 15);
       setState(() { isSearchVisible = false; });
-      _assignSavedTargetToP(pos); 
+      await _assignSavedTargetToP(pos); 
       FocusScope.of(context).unfocus();
       return;
     }
@@ -1739,7 +1741,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           
           _mapController.move(pos, 15);
           setState(() { isSearchVisible = false; });
-          _assignSavedTargetToP(pos); 
+          await _assignSavedTargetToP(pos); 
           FocusScope.of(context).unfocus();
         } else { _showMsg("Không tìm thấy địa điểm"); }
       }
@@ -2034,7 +2036,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         title: const Text("Vị trí tìm kiếm"),
         content: Text(coords, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace')),
         actions: [
-          IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 35), onPressed: () { Navigator.pop(ctx); _assignSavedTargetToP(searchMarker!); }),
+          IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 35), onPressed: () async { Navigator.pop(ctx); await _assignSavedTargetToP(searchMarker!); }),
           IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { setState(() => searchMarker = null); Navigator.pop(ctx); }),
         ],
       ),
@@ -2117,7 +2119,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             ),
             actionsAlignment: MainAxisAlignment.spaceEvenly,
             actions: [
-              IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 32), onPressed: () { Navigator.pop(ctx); _assignSavedTargetToP(list[index].location); }),
+              IconButton(icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 32), onPressed: () async { Navigator.pop(ctx); await _assignSavedTargetToP(list[index].location); }),
               IconButton(icon: const Icon(Icons.directions, color: Colors.orange, size: 32), onPressed: () { Navigator.pop(ctx); _openNavigation(list[index].location); }),
               if (!isHistory) 
                 IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 32), onPressed: () { Navigator.pop(ctx); _editTargetName(index, isHistory: isHistory); }),
@@ -2214,7 +2216,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.edit, color: Colors.blue, size: 18)),
                 ),
               InkWell(
-                onTap: () { _assignSavedTargetToP(target.location); Navigator.pop(ctx); },
+                onTap: () async { await _assignSavedTargetToP(target.location); Navigator.pop(ctx); },
                 child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.play_circle_fill, color: Colors.green, size: 18)),
               ),
               InkWell(
@@ -2248,7 +2250,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
   }
 
-  void _addNewBeacon() {
+  Future<void> _addNewBeacon() async {
     if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
@@ -2268,122 +2270,126 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
 
-    setState(() {
-      String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
+    String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
+    LatLng? bestK;
+    LatLng? finalPoint;
 
-      if (beacons.length >= 3) {
-        LatLng? bestK = _internalCalculateBestFit();
+    if (beacons.length >= 3) {
+      bestK = _internalCalculateBestFit();
 
-        int countM = beacons.where((b) => b.unit == 'm').length;
-        int countKm = beacons.where((b) => b.unit == 'km').length;
-        int countMi = beacons.where((b) => b.unit == 'mi').length;
-        int countFt = beacons.where((b) => b.unit == 'ft').length;
+      int countM = beacons.where((b) => b.unit == 'm').length;
+      int countKm = beacons.where((b) => b.unit == 'km').length;
+      int countMi = beacons.where((b) => b.unit == 'mi').length;
+      int countFt = beacons.where((b) => b.unit == 'ft').length;
 
-        bool isRefereeMode = (countM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
-        LatLng? finalPoint;
+      bool isRefereeMode = (countM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
 
-        if (isRefereeMode) {
-            String pairUnit = (countM == 2) ? 'm' : 'mi';
-            var pair = beacons.where((b) => b.unit == pairUnit).toList();
-            var referee = beacons.firstWhere((b) => b.unit != pairUnit);
-            
-            if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
-                 var roots = _calculateTwoCircleIntersectionPrecise(
-                    pair[0].location!, _getRadiusInMeters(pair[0]), 
-                    pair[1].location!, _getRadiusInMeters(pair[1])
-                 );
-                 
-                 if (roots.length == 2) {
-                     double rRef = _getRadiusInMeters(referee);
-                     
-                     double distRefToK1 = _haversineDistance(referee.location!, roots[0]);
-                     double errorRadius1 = (distRefToK1 - rRef).abs();
-                     double errorFit1 = bestK != null ? _haversineDistance(bestK, roots[0]) : 0;
-                     double totalScore1 = errorRadius1 + errorFit1;
+      if (isRefereeMode) {
+          String pairUnit = (countM == 2) ? 'm' : 'mi';
+          var pair = beacons.where((b) => b.unit == pairUnit).toList();
+          var referee = beacons.firstWhere((b) => b.unit != pairUnit);
+          
+          if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
+               var roots = _calculateTwoCircleIntersectionPrecise(
+                  pair[0].location!, _getRadiusInMeters(pair[0]), 
+                  pair[1].location!, _getRadiusInMeters(pair[1])
+               );
+               
+               if (roots.length == 2) {
+                   double rRef = _getRadiusInMeters(referee);
+                   
+                   double distRefToK1 = _haversineDistance(referee.location!, roots[0]);
+                   double errorRadius1 = (distRefToK1 - rRef).abs();
+                   double errorFit1 = bestK != null ? _haversineDistance(bestK, roots[0]) : 0;
+                   double totalScore1 = errorRadius1 + errorFit1;
 
-                     double distRefToK2 = _haversineDistance(referee.location!, roots[1]);
-                     double errorRadius2 = (distRefToK2 - rRef).abs();
-                     double errorFit2 = bestK != null ? _haversineDistance(bestK, roots[1]) : 0;
-                     double totalScore2 = errorRadius2 + errorFit2;
+                   double distRefToK2 = _haversineDistance(referee.location!, roots[1]);
+                   double errorRadius2 = (distRefToK2 - rRef).abs();
+                   double errorFit2 = bestK != null ? _haversineDistance(bestK, roots[1]) : 0;
+                   double totalScore2 = errorRadius2 + errorFit2;
 
-                     finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
-                 }
-            }
-        }
+                   finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
+               }
+          }
+      }
 
-        if (finalPoint == null && bestK != null) {
-           finalPoint = bestK;
-        }
+      if (finalPoint == null && bestK != null) {
+         finalPoint = bestK;
+      }
 
-        if (finalPoint != null) {
+      if (finalPoint != null) {
+          setState(() {
             beacons.add(Beacon(location: finalPoint, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
-            
             selectedIndex = beacons.length - 1;
             targetPoints.clear();
             isMockingTarget = false;
-            
-            _setMock(finalPoint.latitude, finalPoint.longitude);
-            _zoomToFitAll();
-            _requestFocus(beacons.length - 1); 
-            _switchToTargetApp();
-            return; 
-        }
+          });
+          
+          await _setMock(finalPoint!.latitude, finalPoint!.longitude);
+          _zoomToFitAll();
+          _requestFocus(beacons.length - 1); 
+          await _switchToTargetApp();
+          return; 
       }
-      
-      LatLng? finalPos; 
-      bool autoPlaced = false;
+    }
+    
+    LatLng? finalPos; 
+    bool autoPlaced = false;
 
-      if (beacons.isEmpty) {
-        finalPos = myRealLocation ?? _mapController.camera.center;
-        autoPlaced = true;
-      }
+    if (beacons.isEmpty) {
+      finalPos = myRealLocation ?? _mapController.camera.center;
+      autoPlaced = true;
+    }
 
-      if (beacons.length >= 2) {
-        var b1 = beacons[0];
-        var b2 = beacons[1];
-        if (b1.location != null && b1.controller.text.isNotEmpty &&
-            b2.location != null && b2.controller.text.isNotEmpty) {
-            try {
-              double r1 = _getRadiusInMeters(b1);
-              double r2 = _getRadiusInMeters(b2);
-              List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
-              if (intersections.isNotEmpty) {
-                finalPos = intersections[0]; 
-                autoPlaced = true;
-              }
-            } catch (e) {}
-        }
+    if (beacons.length >= 2) {
+      var b1 = beacons[0];
+      var b2 = beacons[1];
+      if (b1.location != null && b1.controller.text.isNotEmpty &&
+          b2.location != null && b2.controller.text.isNotEmpty) {
+          try {
+            double r1 = _getRadiusInMeters(b1);
+            double r2 = _getRadiusInMeters(b2);
+            List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+            if (intersections.isNotEmpty) {
+              finalPos = intersections[0]; 
+              autoPlaced = true;
+            }
+          } catch (e) {}
       }
-      
-      if (!autoPlaced) {
-        int newIndex = beacons.length; 
-        if (newIndex > 0) {
-           Beacon prevBeacon = beacons[newIndex - 1];
-           if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
-                   double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
-                   if (r != null && r > 0) {
-                        double distMeters = _getRadiusInMeters(prevBeacon);
-                        LatLng center = prevBeacon.location!;
-                        double bearing = _calculateOptimalBearing(center, newIndex);
-                        finalPos = _calculatePointFromBearing(center, distMeters, bearing);
-                   }
-           }
-        }
+    }
+    
+    if (!autoPlaced) {
+      int newIndex = beacons.length; 
+      if (newIndex > 0) {
+         Beacon prevBeacon = beacons[newIndex - 1];
+         if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
+                 double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
+                 if (r != null && r > 0) {
+                      double distMeters = _getRadiusInMeters(prevBeacon);
+                      LatLng center = prevBeacon.location!;
+                      double bearing = _calculateOptimalBearing(center, newIndex);
+                      finalPos = _calculatePointFromBearing(center, distMeters, bearing);
+                 }
+         }
       }
+    }
 
-      if (finalPos != null) {
+    if (finalPos != null) {
+      setState(() {
         beacons.add(Beacon(location: finalPos, color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
         selectedIndex = beacons.length - 1;
         targetPoints.clear();
         isMockingTarget = false;
-        _setMock(finalPos.latitude, finalPos.longitude);
-        _zoomToFitAll();
-        _switchToTargetApp(); 
-      } else {
+      });
+      await _setMock(finalPos!.latitude, finalPos!.longitude);
+      _zoomToFitAll();
+      await _switchToTargetApp(); 
+    } else {
+      setState(() {
         beacons.add(Beacon(color: colorPalette[beacons.length % colorPalette.length], unit: defaultNewUnit));
-      }
-      _requestFocus(beacons.length - 1); 
-    });
+      });
+    }
+    _requestFocus(beacons.length - 1); 
   }
 
   @override
@@ -2446,7 +2452,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                       onTap: () {
                                         setState(() {});
                                       },
-                                      onSubmitted: (val) {
+                                      onSubmitted: (val) async {
                                         String text = val.toLowerCase().trim();
                                         bool isRestartP1 = text.contains(',');
                                         
@@ -2460,12 +2466,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         if (isRestartP1) {
                                             beacons[i].controller.text = numStr;
                                             setState(() { selectedIndex = i; });
-                                            _restartWithResultAsP1();
+                                            await _restartWithResultAsP1();
                                         } else {
-                                            _addNewBeacon();
+                                            await _addNewBeacon();
                                         }
                                       },
-                                      onChanged: (val) {
+                                      onChanged: (val) async {
                                         String text = val.toLowerCase();
                                         
                                         bool hasMinus = text.contains('-');
@@ -2495,10 +2501,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                            
                                            if (isRestartP1) {
                                                setState(() { selectedIndex = i; });
-                                               _restartWithResultAsP1();
+                                               await _restartWithResultAsP1();
                                            } else {
                                                if (numStr.isNotEmpty) {
-                                                 _addNewBeacon();
+                                                 await _addNewBeacon();
                                                }
                                            }
                                         }
@@ -2549,12 +2555,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               children: availableUnits.map((unit) => Padding(
                                 padding: const EdgeInsets.only(right: 6.0),
                                 child: InkWell(
-                                  onTap: () {
+                                  onTap: () async {
                                     _setUnitForSelectedBeacon(unit);
                                     int focusedIdx = beacons.indexWhere((b) => b.focusNode.hasFocus);
                                     if (focusedIdx != -1 && focusedIdx == beacons.length - 1) {
                                       if (beacons[focusedIdx].controller.text.isNotEmpty) {
-                                        _addNewBeacon();
+                                        await _addNewBeacon();
                                       }
                                     }
                                   },
@@ -2624,7 +2630,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                     LatLng pos = LatLng(lat, lng);
                                     
                                     _mapController.move(pos, 15);
-                                    _assignSavedTargetToP(pos);
+                                    await _assignSavedTargetToP(pos);
                                     _showMsg("Đã dán và chạy tọa độ!");
                                   } else {
                                     _showMsg("Nội dung copy không phải là tọa độ hợp lệ!");
@@ -2697,11 +2703,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               maintainSize: true, maintainAnimation: true, maintainState: true,
                               child: IconButton(
                                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                                onPressed: isAnyMocking ? _stopMock : () { 
+                                onPressed: isAnyMocking ? _stopMock : () async { 
                                    if (selectedIndex != null && beacons[selectedIndex!].location != null) {
-                                     _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
+                                     await _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
                                    } else if (targetPoints.isNotEmpty) {
-                                     _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
+                                     await _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
                                    }
                                 },
                                 icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
@@ -2727,7 +2733,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                     addressColor = Colors.grey; 
                                     selectedIndex = null; 
                                   });
-                                  _stopMock();
+                                  await _stopMock();
                                   _zoomToFitAll();
                                   
                                   if (await FlutterOverlayWindow.isActive()) {
@@ -2810,7 +2816,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         onTap: (_, latlng) {
                           FocusManager.instance.primaryFocus?.unfocus(); 
                         },
-                        onLongPress: (_, latlng) {
+                        onLongPress: (_, latlng) async {
                           if (_isActionBlocked()) {
                             _showPaymentDialog();
                             return;
@@ -2846,7 +2852,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           });
 
                           _requestFocus(targetIndex);
-                          _setMock(latlng.latitude, latlng.longitude);
+                          await _setMock(latlng.latitude, latlng.longitude);
                           _showMsg("Đã gán và MOCK ${_getBeaconName(targetIndex)}");
                         },
                       ),
