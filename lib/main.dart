@@ -70,7 +70,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
 
-      if (event == 'to_target') {
+      // Lắng nghe lệnh cập nhật tên gói từ App chính
+      if (event == 'update_packages') {
+        await _loadTargetFromDisk();
+      } else if (event == 'to_target') {
         setState(() {
           _isReturning = true;
           _bgColor = Colors.green.shade800;
@@ -83,6 +86,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           _opacity = 0.4;
         });
       } else if (event == 'show') {
+        await _loadTargetFromDisk(); // Chắc chắn cập nhật lại khi hiện lên
         setState(() => _opacity = 0.4);
       }
     });
@@ -91,7 +95,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Future<void> _loadTargetFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.reload(); 
+      await prefs.reload(); // Bắt buộc tải lại từ ổ đĩa cứng
       setState(() {
         _targetPackage = prefs.getString('target_app_package');
         _secondTargetPackage = prefs.getString('second_target_app_package');
@@ -1009,6 +1013,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 });
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.remove('target_app_package');
+                FlutterOverlayWindow.shareData('update_packages'); // Gọi Overlay tự F5
                 if (await FlutterOverlayWindow.isActive()) {
                   await FlutterOverlayWindow.closeOverlay();
                   setState(() => _isOverlayActive = false);
@@ -1067,6 +1072,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                   onTap: () async {
                     setState(() => targetAppPackage = app.packageName);
                     await _saveTargetApp(app.packageName!);
+                    FlutterOverlayWindow.shareData('update_packages'); // Gọi Overlay tự F5
                     Navigator.pop(ctx);
                     _showMsg("Đã liên kết: ${app.name}");
                     if (_autoShowOverlay) {
@@ -1106,6 +1112,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 setState(() => secondTargetAppPackage = null);
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.remove('second_target_app_package');
+                FlutterOverlayWindow.shareData('update_packages'); // Gọi Overlay tự F5
                 _showMsg("Đã xóa liên kết App phụ!");
               },
             ),
@@ -1148,6 +1155,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     setState(() => secondTargetAppPackage = app.packageName);
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setString('second_target_app_package', app.packageName!);
+                    FlutterOverlayWindow.shareData('update_packages'); // Gọi Overlay tự F5
                     Navigator.pop(ctx);
                     _showMsg("Đã liên kết App phụ: ${app.name}");
                   },
@@ -1195,7 +1203,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FlutterOverlayWindow.shareData('show'); 
       return;
     }
-    // Mở rộng bộ khung cửa sổ nổi trên Android rộng rãi để chống nghẽn
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
       flag: OverlayFlag.defaultFlag, 
