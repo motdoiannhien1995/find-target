@@ -461,7 +461,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 _buildInstructionRow(Icons.rocket_launch, Colors.blueAccent, "Nhấn giữ để chọn App phụ. Bấm để chuyển nhanh sang App phụ đó."),
                 _buildInstructionRow(Icons.content_paste_go, Colors.blue, "Nút dán. Nếu bạn copy tọa độ, bấm vào đây app sẽ nhảy thẳng vị trí đó luôn."),
                 _buildInstructionRow(Icons.looks_one, Colors.teal, "Lấy tọa độ đang chạy gán vào Mốc 1 mới để tiếp tục dò đường. (Sẽ tự động mang theo khoảng cách vừa nhập)"),
-                _buildInstructionRow(Icons.refresh, Colors.orange, "Bấm nút này để Đảo chiều K1, K2. Sẽ tự động nhảy app."),
+                _buildInstructionRow(Icons.refresh, Colors.orange, "Bấm nút này để cập nhật lại vị trí mốc tạo lỗi, hoặc để Đảo chiều K1, K2. Sẽ tự động nhảy app."),
                 _buildInstructionRow(Icons.map, Colors.indigo, "Xem tọa độ trên ứng dụng bản đồ khác (Google Maps..)."),
                 _buildInstructionRow(Icons.play_circle, Colors.green, "Bắt đầu/Dừng phát vị trí mô phỏng đến máy."),
                 _buildInstructionRow(Icons.save, Colors.blue, "Lưu lại tọa độ của mục tiêu vào danh sách để sử dụng lại sau."),
@@ -1545,11 +1545,20 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _showMsg("Chưa chọn điểm nào để tính lại!");
       return;
     }
-    int index = selectedIndex!;
+    
+    int originalIndex = selectedIndex!;
+    int targetIndex = originalIndex;
+    bool isFixingNext = false;
+    
+    // NẾU KHÔNG PHẢI MỐC CUỐI CÙNG -> Người dùng muốn reset lại mốc liền sau nó (mốc tạo sai)
+    if (originalIndex < beacons.length - 1) {
+      targetIndex = originalIndex + 1;
+      isFixingNext = true;
+    }
 
     List<Beacon> otherBeacons = [];
     for (int i = 0; i < beacons.length; i++) {
-      if (i != index && beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
+      if (i != targetIndex && beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
         double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
         if (d != null && d > 0) {
           otherBeacons.add(beacons[i]);
@@ -1570,11 +1579,18 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
 
       if (intersections.isNotEmpty) {
-        if (intersections.length == 2 && beacons[index].location != null) {
-          LatLng currentPos = beacons[index].location!;
+        if (intersections.length == 2 && beacons[targetIndex].location != null) {
+          LatLng currentPos = beacons[targetIndex].location!;
           double d1 = _haversineDistance(currentPos, intersections[0]);
           double d2 = _haversineDistance(currentPos, intersections[1]);
-          newPos = (d1 > d2) ? intersections[0] : intersections[1];
+          
+          // Nếu đang cập nhật mốc tiếp theo -> Giữ điểm gần vị trí cũ nhất để đỡ bị lật K1/K2
+          // Nếu bấm đảo chiều chính mốc cuối -> Lấy điểm xa hơn (Đảo K1/K2)
+          if (!isFixingNext) {
+             newPos = (d1 > d2) ? intersections[0] : intersections[1]; 
+          } else {
+             newPos = (d1 < d2) ? intersections[0] : intersections[1]; 
+          }
         } else {
           newPos = intersections[0];
         }
@@ -1582,8 +1598,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } else if (otherBeacons.length == 1) {
       var ref = otherBeacons[0];
       double r = _getRadiusInMeters(ref);
-      if (beacons[index].location != null) {
-        double bearing = _calculateBearing(ref.location!, beacons[index].location!);
+      if (beacons[targetIndex].location != null) {
+        double bearing = _calculateBearing(ref.location!, beacons[targetIndex].location!);
+        // Áp dụng bán kính r mới trên cùng một góc -> tự động duỗi ra/thu vào đúng khoảng cách mới
         newPos = _calculatePointFromBearing(ref.location!, r, bearing);
       } else {
         newPos = _calculatePointFromBearing(ref.location!, r, 0);
@@ -1592,14 +1609,21 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
     if (newPos != null) {
       setState(() {
-        beacons[index].location = newPos;
+        beacons[targetIndex].location = newPos;
+        selectedIndex = targetIndex; 
         targetPoints.clear();
       });
-      _requestFocus(index); 
+      _requestFocus(targetIndex); 
       _mapController.move(newPos, _mapController.camera.zoom);
       _setMock(newPos.latitude, newPos.longitude);
       _zoomToFitAll();
-      _showMsg(otherBeacons.length >= 3 ? "Đã tính lại vị trí chính xác!" : "Đã đảo vị trí K1/K2 thành công!");
+      
+      if (!isFixingNext) {
+         _showMsg(otherBeacons.length >= 3 ? "Đã tính lại vị trí chính xác!" : "Đã đảo vị trí K1/K2 thành công!");
+      } else {
+         _showMsg("Đã cập nhật lại vị trí ${_getBeaconName(targetIndex)}!");
+      }
+      
       _switchToTargetApp(); 
     } else {
       _showMsg("Không đủ dữ liệu để tính lại! Cần ít nhất 1-2 điểm khác.");
