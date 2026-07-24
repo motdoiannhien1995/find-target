@@ -62,8 +62,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.initState();
     _loadTargetFromDisk();
     
-    FlutterOverlayWindow.overlayListener.listen((event) {
+    FlutterOverlayWindow.overlayListener.listen((event) async {
       if (!mounted) return;
+      
+      // Gỡ bỏ trạng thái xuyên thấu bất cứ khi nào có lệnh điều khiển nút nổi
+      try {
+        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      } catch (e) {}
+
       if (event == 'to_target') {
         setState(() {
           _isReturning = true;
@@ -120,71 +126,73 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     }
   }
 
+  Widget _buildButton(IconData icon, String? pkg, bool isMain) {
+    bool isDisabled = !isMain && (pkg == null || pkg.isEmpty);
+    return InkWell(
+      onTap: isDisabled ? null : () async {
+        setState(() {
+          _opacity = 0.4; 
+          _bgColor = isMain ? Colors.blue.shade800 : (pkg == _targetPackage ? Colors.green.shade800 : Colors.deepOrange);
+        });
+
+        if (isMain) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('overlay_is_returning', false);
+          await _launchApp(_myPackage);
+        } else {
+          if (pkg == _targetPackage) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('overlay_is_returning', true);
+          }
+          await _launchApp(pkg!);
+        }
+      },
+      onLongPress: () async {
+        setState(() {
+          _opacity = 0.0;
+        });
+        try {
+          await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+        } catch (e) {}
+      },
+      borderRadius: BorderRadius.circular(30),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 12.0),
+        child: Icon(
+          icon, 
+          color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), 
+          size: 26
+        ),
+      ),
+    );
+  }
+
  @override
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
       child: Center(
-        child: Container(
-          width: 100, 
-          height: 100, 
-          decoration: BoxDecoration(
-            color: _bgColor.withOpacity(_opacity), 
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.5), 
-            boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(100),
-            
-            onLongPress: () {
-              setState(() {
-                _opacity = _opacity == 0.4 ? 0.0 : 0.4;
-              });
-            },
-
-            onDoubleTap: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.reload();
-              _secondTargetPackage = prefs.getString('second_target_app_package') ?? _secondTargetPackage;
-              
-              if (_secondTargetPackage != null) {
-                await _launchApp(_secondTargetPackage!);
-              }
-            },
-
-            onTap: () async {
-              setState(() {
-                _bgColor = Colors.deepOrange;
-                _opacity = 0.4; 
-              });
-
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.reload();
-              _targetPackage = prefs.getString('target_app_package') ?? _targetPackage;
-              
-              if (_targetPackage != null) {
-                if (_isReturning) {
-                  setState(() {
-                    _isReturning = false;
-                    _bgColor = Colors.blue.shade800;
-                  });
-                  await prefs.setBool('overlay_is_returning', false);
-                  await _launchApp(_myPackage);
-                } else {
-                  setState(() {
-                    _isReturning = true;
-                    _bgColor = Colors.green.shade800;
-                  });
-                  await prefs.setBool('overlay_is_returning', true);
-                  await _launchApp(_targetPackage!);
-                }
-              } else {
-                  if (mounted) setState(() => _bgColor = Colors.grey.shade800);
-              }
-            },
-
-            child: const SizedBox(), 
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Container(
+            height: 60, 
+            decoration: BoxDecoration(
+              color: _bgColor.withOpacity(_opacity), 
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.0), 
+              boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildButton(Icons.my_location, _myPackage, true),
+                Container(width: 1, height: 30, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                _buildButton(Icons.layers, _targetPackage, false),
+                Container(width: 1, height: 30, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                _buildButton(Icons.rocket_launch, _secondTargetPackage, false),
+              ],
+            ),
           ),
         ),
       ),
@@ -1187,14 +1195,15 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FlutterOverlayWindow.shareData('show'); 
       return;
     }
+    // Mở rộng bộ khung cửa sổ nổi trên Android rộng rãi để chống nghẽn
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
       flag: OverlayFlag.defaultFlag, 
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 110, 
-      width: 110,  
+      height: 100, 
+      width: 300,  
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
@@ -2419,7 +2428,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     children: [
                       Expanded(
                         child: SizedBox(
-                          height: 70,
+                          height: 90, 
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             itemCount: beacons.length,
