@@ -1603,7 +1603,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
-  // CẬP NHẬT: Cho phép lấy tọa độ nguồn từ mốc hiện tại hoặc vị trí map nếu chưa chạy mock
   Future<void> _restartWithResultAsP1(int fromIndex) async {
     _autoSaveLastTargetBeforeClearing(); 
 
@@ -2221,6 +2220,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
 
+    // BỔ SUNG: Kiểm tra nếu tổng số mốc đạt đơn vị mét (m) từ 2 điểm trở lên -> Tự động xóa sạch các mốc/mục tiêu đơn vị km cũ
     int countM = beacons.where((b) => b.unit == 'm').length;
     if (countM >= 2) {
       for (int i = beacons.length - 1; i >= 0; i--) {
@@ -2453,7 +2453,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                               return; 
                                            }
 
-                                           if (i < beacons.length - 1) {
+                                           if (i < beacons.length - 1 && !isRestartP1) {
                                              for (int j = i + 1; j < beacons.length; j++) {
                                                beacons[j].dispose();
                                              }
@@ -2468,14 +2468,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                            if (hasMinus || hasK) beacons[i].unit = 'km';
                                            if (hasSpace || hasM) beacons[i].unit = 'm';
 
-                                           int currentCountM = beacons.where((b) => b.unit == 'm').length;
-                                           if (currentCountM >= 2) {
-                                             for (int j = beacons.length - 1; j >= 0; j--) {
-                                               if (beacons[j].unit == 'km') {
-                                                 beacons[j].dispose();
-                                                 beacons.removeAt(j);
+                                           if (!isRestartP1) {
+                                               int currentCountM = beacons.where((b) => b.unit == 'm').length;
+                                               if (currentCountM >= 2) {
+                                                 for (int j = beacons.length - 1; j >= 0; j--) {
+                                                   if (beacons[j].unit == 'km') {
+                                                     beacons[j].dispose();
+                                                     beacons.removeAt(j);
+                                                   }
+                                                 }
                                                }
-                                             }
                                            }
                                            
                                            if (isRestartP1) {
