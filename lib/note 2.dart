@@ -326,7 +326,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   String? secondTargetAppPackage; 
   
   bool _isLoadingLocation = false;
-  Timer? _resetSwitchTimer; 
 
   static const double earthRadius = 6371000.0;
   
@@ -745,7 +744,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _serviceStatusStreamSubscription?.cancel();
-    _resetSwitchTimer?.cancel(); 
     _mapController.dispose();
     _searchCtrl.dispose();
     for (var b in beacons) b.dispose();
@@ -1540,9 +1538,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       var ref = otherBeacons[0];
       double r = _getRadiusInMeters(ref);
       if (beacons[targetIndex].location != null) {
-        double currentBearing = _calculateBearing(ref.location!, beacons[targetIndex].location!);
-        double newBearing = (currentBearing + 80.0) % 360.0;
-        newPos = _calculatePointFromBearing(ref.location!, r, newBearing);
+        double bearing = _calculateBearing(ref.location!, beacons[targetIndex].location!);
+        newPos = _calculatePointFromBearing(ref.location!, r, bearing);
       } else {
         newPos = _calculatePointFromBearing(ref.location!, r, 0);
       }
@@ -1554,35 +1551,18 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         selectedIndex = targetIndex; 
         targetPoints.clear();
       });
-      
-      FocusManager.instance.primaryFocus?.unfocus(); 
-      
+      _requestFocus(targetIndex); 
       _mapController.move(newPos, _mapController.camera.zoom);
       await _setMock(newPos.latitude, newPos.longitude);
       _zoomToFitAll();
       
       if (!isFixingNext) {
-         if (otherBeacons.length >= 3) {
-            _showMsg("Đã tính lại vị trí chính xác!");
-         } else if (otherBeacons.length == 2) {
-            _showMsg("Đã đảo vị trí K1/K2 thành công!");
-         } else {
-            _showMsg("Đã xoay điểm thêm 80 độ!");
-         }
+         _showMsg(otherBeacons.length >= 3 ? "Đã tính lại vị trí chính xác!" : "Đã đảo vị trí K1/K2 thành công!");
       } else {
          _showMsg("Đã cập nhật lại vị trí ${_getBeaconName(targetIndex)}!");
       }
       
-      if (!isFixingNext && otherBeacons.length == 1) {
-        _resetSwitchTimer?.cancel();
-        _resetSwitchTimer = Timer(const Duration(milliseconds: 1500), () async {
-          _requestFocus(targetIndex); 
-          await _switchToTargetApp();
-        });
-      } else {
-        _requestFocus(targetIndex); 
-        await _switchToTargetApp(); 
-      }
+      await _switchToTargetApp(); 
     } else {
       _showMsg("Không đủ dữ liệu để tính lại! Cần ít nhất 1-2 điểm khác.");
     }
@@ -2240,6 +2220,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
 
+    // BỔ SUNG: Kiểm tra nếu tổng số mốc đạt đơn vị mét (m) từ 2 điểm trở lên -> Tự động xóa sạch các mốc/mục tiêu đơn vị km cũ
+    int countM = beacons.where((b) => b.unit == 'm').length;
+    if (countM >= 2) {
+      for (int i = beacons.length - 1; i >= 0; i--) {
+        if (beacons[i].unit == 'km') {
+          beacons[i].dispose();
+          beacons.removeAt(i);
+        }
+      }
+    }
+
     String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
     LatLng? bestK;
     LatLng? finalPoint;
@@ -2477,6 +2468,18 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                            if (hasMinus || hasK) beacons[i].unit = 'km';
                                            if (hasSpace || hasM) beacons[i].unit = 'm';
 
+                                           if (!isRestartP1) {
+                                               int currentCountM = beacons.where((b) => b.unit == 'm').length;
+                                               if (currentCountM >= 2) {
+                                                 for (int j = beacons.length - 1; j >= 0; j--) {
+                                                   if (beacons[j].unit == 'km') {
+                                                     beacons[j].dispose();
+                                                     beacons.removeAt(j);
+                                                   }
+                                                 }
+                                               }
+                                           }
+                                           
                                            if (isRestartP1) {
                                                setState(() { selectedIndex = i; });
                                                await _restartWithResultAsP1(i);
@@ -2914,4 +2917,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} //// OK
+}
