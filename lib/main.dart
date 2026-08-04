@@ -149,6 +149,25 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           await _launchApp(pkg!);
         }
       },
+      onDoubleTap: () async {
+        setState(() {
+          _opacity = 0.0;
+        });
+        try {
+          await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+        } catch (e) {}
+
+        await Future.delayed(const Duration(seconds: 3));
+
+        if (mounted) {
+          setState(() {
+            _opacity = 0.4;
+          });
+          try {
+            await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+          } catch (e) {}
+        }
+      },
       onLongPress: () async {
         setState(() {
           _opacity = 0.0;
@@ -2914,4 +2933,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} //// OK
+}
