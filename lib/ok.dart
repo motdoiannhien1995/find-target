@@ -349,7 +349,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   static const double earthRadius = 6371000.0;
   
-  final List<Color> colorPalette = [Colors.orange, Colors.teal, Colors.redAccent, Colors.brown, Colors.blueAccent, Colors.blue];
+  final List<Color> colorPalette = [Colors.orange, Colors.teal, Colors.pink, Colors.brown, Colors.indigo, Colors.blue];
 
   int? _lastFocusedIndex;
 
@@ -1215,14 +1215,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   double _toRadians(double degree) => degree * pi / 180.0;
   double _toDegrees(double radian) => radian * 180.0 / pi;
 
+  // Tính khoảng cách phẳng Local Tangent Plane (Độ chính xác tuyệt đối ở cự ly hẹp)
   double _calculateExactDistance(LatLng p1, LatLng p2) {
-    double dLat = _toRadians(p2.latitude - p1.latitude);
-    double dLon = _toRadians(p2.longitude - p1.longitude);
-    double a = sin(dLat / 2) * sin(dLat / 2) +
-               cos(_toRadians(p1.latitude)) * cos(_toRadians(p2.latitude)) *
-               sin(dLon / 2) * sin(dLon / 2);
-    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return earthRadius * c;
+    double latMid = _toRadians((p1.latitude + p2.latitude) / 2.0);
+    double mPerDegLat = 111132.92 - 559.82 * cos(2 * latMid) + 1.175 * cos(4 * latMid);
+    double mPerDegLng = 111412.84 * cos(latMid) - 93.5 * cos(3 * latMid);
+    double dx = (p2.longitude - p1.longitude) * mPerDegLng;
+    double dy = (p2.latitude - p1.latitude) * mPerDegLat;
+    return sqrt(dx * dx + dy * dy);
   }
 
   double _calculateBearing(LatLng start, LatLng end) {
@@ -1238,14 +1238,25 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   LatLng _calculatePointFromBearing(LatLng start, double distanceMeters, double bearingDegrees) {
-    double bearingRad = _toRadians(bearingDegrees); 
-    double startLat = _toRadians(start.latitude);
-    double startLng = _toRadians(start.longitude);
-    double distRatio = distanceMeters / earthRadius;
-    
-    double endLat = asin(sin(startLat) * cos(distRatio) + cos(startLat) * sin(distRatio) * cos(bearingRad));
-    double endLng = startLng + atan2(sin(bearingRad) * sin(distRatio) * cos(startLat), cos(distRatio) - sin(startLat) * sin(endLat));
-    return LatLng(_toDegrees(endLat), _toDegrees(endLng));
+    if (distanceMeters < 50000) { 
+      double latMid = _toRadians(start.latitude);
+      double mPerDegLat = 111132.92 - 559.82 * cos(2 * latMid) + 1.175 * cos(4 * latMid);
+      double mPerDegLng = 111412.84 * cos(latMid) - 93.5 * cos(3 * latMid);
+      
+      double dx = distanceMeters * sin(_toRadians(bearingDegrees));
+      double dy = distanceMeters * cos(_toRadians(bearingDegrees));
+      
+      return LatLng(start.latitude + dy / mPerDegLat, start.longitude + dx / mPerDegLng);
+    } else { 
+      double bearingRad = _toRadians(bearingDegrees); 
+      double startLat = _toRadians(start.latitude);
+      double startLng = _toRadians(start.longitude);
+      double distRatio = distanceMeters / earthRadius;
+      
+      double endLat = asin(sin(startLat) * cos(distRatio) + cos(startLat) * sin(distRatio) * cos(bearingRad));
+      double endLng = startLng + atan2(sin(bearingRad) * sin(distRatio) * cos(startLat), cos(distRatio) - sin(startLat) * sin(endLat));
+      return LatLng(_toDegrees(endLat), _toDegrees(endLng));
+    }
   }
 
   List<LatLng> _calculateTwoCircleIntersectionPrecise(LatLng p1, double r1, LatLng p2, double r2) {
@@ -1257,38 +1268,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     double dy = (p2.latitude - p1.latitude) * mPerDegLat;
     double d = sqrt(dx * dx + dy * dy);
 
-    if (d == 0) {
-      return [r1 <= r2 ? p1 : p2]; 
-    }
-
-    if (d > r1 + r2) {
-        bool p1Small = r1 <= r2;
-        double rS = p1Small ? r1 : r2;
-        double ratio = rS / d;
-        if (p1Small) {
-            return [LatLng(p1.latitude + (dy * ratio) / mPerDegLat, p1.longitude + (dx * ratio) / mPerDegLng)];
-        } else {
-            return [LatLng(p2.latitude + (-dy * ratio) / mPerDegLat, p2.longitude + (-dx * ratio) / mPerDegLng)];
-        }
-    } 
-    else if (d < (r1 - r2).abs()) {
-        bool p1Small = r1 <= r2;
-        double rS = p1Small ? r1 : r2;
-        double ratio = rS / d;
-        if (p1Small) {
-            return [LatLng(p1.latitude + (-dy * ratio) / mPerDegLat, p1.longitude + (-dx * ratio) / mPerDegLng)];
-        } else {
-            return [LatLng(p2.latitude + (dy * ratio) / mPerDegLat, p2.longitude + (dx * ratio) / mPerDegLng)];
-        }
+    double tolerance = 2.0;
+    if (d == 0 || d > r1 + r2 + tolerance || d < (r1 - r2).abs() - tolerance) {
+      return []; 
     }
 
     double a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
     double hSquare = r1 * r1 - a * a;
-    if (hSquare < 0) hSquare = 0; 
-    
+    double h = hSquare > 0 ? sqrt(hSquare) : 0.0;
+
     double cx = dx * a / d;
     double cy = dy * a / d;
-    double h = sqrt(hSquare);
 
     double px1 = cx - dy * h / d;
     double py1 = cy + dx * h / d;
@@ -1305,112 +1295,121 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
-
-      for (var b in validBeacons) {
-        if (_getRadiusInMeters(b) <= 0) return b.location;
-      }
-
-      List<LatLng> candidates = [];
-
-      for (int i = 0; i < validBeacons.length; i++) {
-        for (int j = i + 1; j < validBeacons.length; j++) {
-          double r1 = _getRadiusInMeters(validBeacons[i]);
-          double r2 = _getRadiusInMeters(validBeacons[j]);
-          candidates.addAll(_calculateTwoCircleIntersectionPrecise(
-              validBeacons[i].location!, r1, 
-              validBeacons[j].location!, r2));
-        }
-      }
-      
-      for (var b in validBeacons) {
-        candidates.add(b.location!);
-      }
-
-      double bestError = double.infinity;
-      LatLng bestPoint = candidates.first;
-
-      for (var pt in candidates) {
-        double err = _calculateTotalError(pt, validBeacons);
-        if (err < bestError) {
-          bestError = err;
-          bestPoint = pt;
-        }
-      }
-      
-      return _optimizePoint(bestPoint, validBeacons);
+      return _calculateBestFit(validBeacons);
   }
 
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
-    double lat = startPoint.latitude;
-    double lng = startPoint.longitude;
+    LatLng currentPos = startPoint;
+    double stepSize = 0.00005; 
+    double minStep = 0.000000001; 
+    int maxIterations = 2000; 
+    int iter = 0;
 
-    double step = 0.0001; 
-    double minStep = 1e-9; 
+    while (stepSize > minStep && iter < maxIterations) {
+      iter++;
+      LatLng bestNeighbor = currentPos;
+      double minError = _calculateTotalError(currentPos, beacons);
+      bool improved = false;
 
-    for (int i = 0; i < 300; i++) {
-      double currentError = _calculateTotalError(LatLng(lat, lng), beacons);
-      
-      double dLat = 1e-6; 
-      double dLng = 1e-6; 
-      
-      double errUp = _calculateTotalError(LatLng(lat + dLat, lng), beacons);
-      double errDown = _calculateTotalError(LatLng(lat - dLat, lng), beacons);
-      double errRight = _calculateTotalError(LatLng(lat, lng + dLng), beacons);
-      double errLeft = _calculateTotalError(LatLng(lat, lng - dLng), beacons);
-      
-      double gradLat = (errUp - errDown) / (2 * dLat);
-      double gradLng = (errRight - errLeft) / (2 * dLng);
-      
-      double gradMag = sqrt(gradLat * gradLat + gradLng * gradLng);
-      if (gradMag == 0) break;
-      
-      double moveLat = - (gradLat / gradMag) * step;
-      double moveLng = - (gradLng / gradMag) * step;
-      
-      LatLng nextPt = LatLng(lat + moveLat, lng + moveLng);
-      double nextError = _calculateTotalError(nextPt, beacons);
-      
-      if (nextError < currentError) {
-        lat = nextPt.latitude;
-        lng = nextPt.longitude;
-        step *= 1.2; 
-      } else {
-        step *= 0.5; 
+      List<LatLng> neighbors = [
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude, currentPos.longitude + stepSize),
+        LatLng(currentPos.latitude, currentPos.longitude - stepSize),
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude + stepSize),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude - stepSize),
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude - stepSize),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude + stepSize),
+      ];
+
+      for (var p in neighbors) {
+        double err = _calculateTotalError(p, beacons);
+        if (err < minError) {
+          minError = err;
+          bestNeighbor = p;
+          improved = true;
+        }
       }
 
-      if (step < minStep) break; 
+      if (improved) {
+        currentPos = bestNeighbor;
+      } else {
+        stepSize /= 2.0; 
+      }
     }
-
-    return LatLng(lat, lng);
+    return currentPos;
   }
 
-double _calculateTotalError(LatLng p, List<Beacon> beacons) {
-  double error = 0;
-  for (var b in beacons) {
-    if (b.location == null) continue;
-    double r = _getRadiusInMeters(b);
-    if (r <= 0) continue;
+  double _calculateTotalError(LatLng p, List<Beacon> beacons) {
+    double totalError = 0;
+    for (var b in beacons) {
+      if (b.location == null) continue;
+      
+      double d = _calculateExactDistance(p, b.location!);
+      double r = _getRadiusInMeters(b);
+      if (r <= 0) continue; 
+      
+      double err = (d - r).abs();
+      
+      // Trọng số thông minh: Mốc càng gần thì trọng số càng cao (ép mục tiêu bám chặt mốc gần)
+      double weight = 1.0 / ((r / 200.0) + 1.0); 
+      
+      totalError += err * err * weight; 
+    }
+    return totalError;
+  }
 
-    double d = _calculateExactDistance(p, b.location!);
-    double diff = (d - r).abs();
+  LatLng? _calculateBestFit(List<Beacon> validBeacons) {
+    if (validBeacons.length < 2) return null;
 
-    double weight = 1.0;
-    if (b.unit == 'km' || b.unit == 'mi') {
-      // 1. Mốc KM: Giảm trọng số tin cậy xuống 0.01 (100 lần)
-      weight = 0.01; 
-      // 2. Vùng đệm 50 mét (do làm tròn hàng trăm mét: sai số +-50m)
-      diff = max(0.0, diff - 50.0); 
+    List<LatLng> allRoots = [];
+    
+    for (int i = 0; i < validBeacons.length - 1; i++) {
+        for (int j = i + 1; j < validBeacons.length; j++) {
+            double r1 = _getRadiusInMeters(validBeacons[i]);
+            double r2 = _getRadiusInMeters(validBeacons[j]);
+            var roots = _calculateTwoCircleIntersectionPrecise(validBeacons[i].location!, r1, validBeacons[j].location!, r2);
+            allRoots.addAll(roots);
+        }
+    }
+
+    LatLng bestStartNode;
+    
+    if (allRoots.isEmpty) {
+      var p1 = validBeacons[0];
+      double r1 = _getRadiusInMeters(p1);
+      if (r1 <= 0) r1 = 10; 
+
+      List<LatLng> candidates = [
+        _calculatePointFromBearing(p1.location!, r1, 0),   
+        _calculatePointFromBearing(p1.location!, r1, 90),  
+        _calculatePointFromBearing(p1.location!, r1, 180), 
+        _calculatePointFromBearing(p1.location!, r1, 270), 
+      ];
+
+      double minE = double.infinity;
+      bestStartNode = candidates[0];
+      for (var c in candidates) {
+        double e = _calculateTotalError(c, validBeacons);
+        if (e < minE) {
+          minE = e;
+          bestStartNode = c;
+        }
+      }
     } else {
-      // 1. Mốc MÉT: Độ tin cậy tuyệt đối
-      weight = 1.0;
-      // 2. Vùng đệm 5 mét (do làm tròn hàng chục mét: sai số +-5m)
-      diff = max(0.0, diff - 5.0); 
+      double minE = double.infinity;
+      bestStartNode = allRoots[0];
+      for (var root in allRoots) {
+          double e = _calculateTotalError(root, validBeacons);
+          if (e < minE) {
+              minE = e;
+              bestStartNode = root;
+          }
+      }
     }
-
-    error += weight * pow(diff, 2);
+    
+    return _optimizePoint(bestStartNode, validBeacons);
   }
-  return error;
-}
 
   void _requestFocus(int index) {
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -1543,7 +1542,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     for (int i = 0; i < beacons.length; i++) {
       if (i != targetIndex && beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
         double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
-        if (d != null && d >= 0) {
+        if (d != null && d > 0) {
           otherBeacons.add(beacons[i]);
         }
       }
@@ -1552,7 +1551,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     LatLng? newPos;
 
     if (otherBeacons.length >= 3) {
-      newPos = _internalCalculateBestFit(); 
+      newPos = _calculateBestFit(otherBeacons);
     } else if (otherBeacons.length == 2) {
       var b1 = otherBeacons[0];
       var b2 = otherBeacons[1];
@@ -1564,19 +1563,16 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
       if (intersections.isNotEmpty) {
         if (intersections.length == 2 && beacons[targetIndex].location != null) {
           LatLng currentPos = beacons[targetIndex].location!;
-          
-          LatLng chosen;
           double d1 = _calculateExactDistance(currentPos, intersections[0]);
           double d2 = _calculateExactDistance(currentPos, intersections[1]);
           
           if (!isFixingNext) {
-             chosen = (d1 > d2) ? intersections[0] : intersections[1]; 
+             newPos = (d1 > d2) ? intersections[0] : intersections[1]; 
           } else {
-             chosen = (d1 < d2) ? intersections[0] : intersections[1]; 
+             newPos = (d1 < d2) ? intersections[0] : intersections[1]; 
           }
-          newPos = _optimizePoint(chosen, otherBeacons);
         } else {
-          newPos = _optimizePoint(intersections[0], otherBeacons);
+          newPos = intersections[0];
         }
       }
     } else if (otherBeacons.length == 1) {
@@ -2284,10 +2280,51 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     }
 
     String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
+    LatLng? bestK;
     LatLng? finalPoint;
 
     if (beacons.length >= 3) {
-      finalPoint = _internalCalculateBestFit();
+      bestK = _internalCalculateBestFit();
+
+      int updatedCountM = beacons.where((b) => b.unit == 'm').length;
+      int countKm = beacons.where((b) => b.unit == 'km').length;
+      int countMi = beacons.where((b) => b.unit == 'mi').length;
+      int countFt = beacons.where((b) => b.unit == 'ft').length;
+
+      bool isRefereeMode = (updatedCountM == 2 && countKm == 1) || (countMi == 2 && countFt == 1);
+
+      if (isRefereeMode) {
+          String pairUnit = (updatedCountM == 2) ? 'm' : 'mi';
+          var pair = beacons.where((b) => b.unit == pairUnit).toList();
+          var referee = beacons.firstWhere((b) => b.unit != pairUnit);
+          
+          if (pair.length == 2 && pair[0].location != null && pair[1].location != null && referee.location != null) {
+               var roots = _calculateTwoCircleIntersectionPrecise(
+                  pair[0].location!, _getRadiusInMeters(pair[0]), 
+                  pair[1].location!, _getRadiusInMeters(pair[1])
+               );
+               
+               if (roots.length == 2) {
+                   double rRef = _getRadiusInMeters(referee);
+                   
+                   double distRefToK1 = _calculateExactDistance(referee.location!, roots[0]);
+                   double errorRadius1 = (distRefToK1 - rRef).abs();
+                   double errorFit1 = bestK != null ? _calculateExactDistance(bestK, roots[0]) : 0;
+                   double totalScore1 = errorRadius1 + errorFit1;
+
+                   double distRefToK2 = _calculateExactDistance(referee.location!, roots[1]);
+                   double errorRadius2 = (distRefToK2 - rRef).abs();
+                   double errorFit2 = bestK != null ? _calculateExactDistance(bestK, roots[1]) : 0;
+                   double totalScore2 = errorRadius2 + errorFit2;
+
+                   finalPoint = (totalScore1 < totalScore2) ? roots[0] : roots[1];
+               }
+          }
+      }
+
+      if (finalPoint == null && bestK != null) {
+         finalPoint = bestK;
+      }
 
       if (finalPoint != null) {
           setState(() {
@@ -2313,7 +2350,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
       autoPlaced = true;
     }
 
-    if (beacons.length >= 2 && finalPoint == null) {
+    if (beacons.length >= 2) {
       var b1 = beacons[0];
       var b2 = beacons[1];
       if (b1.location != null && b1.controller.text.isNotEmpty &&
@@ -2323,7 +2360,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
             double r2 = _getRadiusInMeters(b2);
             List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
             if (intersections.isNotEmpty) {
-              finalPos = _optimizePoint(intersections[0], [b1, b2]);
+              finalPos = intersections[0]; 
               autoPlaced = true;
             }
           } catch (e) {}
@@ -2336,7 +2373,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
          Beacon prevBeacon = beacons[newIndex - 1];
          if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
                  double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
-                 if (r != null && r >= 0) {
+                 if (r != null && r > 0) {
                       double distMeters = _getRadiusInMeters(prevBeacon);
                       LatLng center = prevBeacon.location!;
                       double bearing = _calculateOptimalBearing(center, newIndex);
@@ -2916,4 +2953,4 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
       ),
     );
   }
-}
+} //////////////////////ok

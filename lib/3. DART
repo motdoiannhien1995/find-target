@@ -1384,33 +1384,34 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return LatLng(lat, lng);
   }
 
-double _calculateTotalError(LatLng p, List<Beacon> beacons) {
-  double error = 0;
-  for (var b in beacons) {
-    if (b.location == null) continue;
-    double r = _getRadiusInMeters(b);
-    if (r <= 0) continue;
+  double _calculateTotalError(LatLng p, List<Beacon> beacons) {
+    double error = 0;
+    for (var b in beacons) {
+      if (b.location == null) continue;
+      double r = _getRadiusInMeters(b);
+      if (r <= 0) continue;
 
-    double d = _calculateExactDistance(p, b.location!);
-    double diff = (d - r).abs();
+      double d = _calculateExactDistance(p, b.location!);
+      double diff = (d - r).abs();
 
-    double weight = 1.0;
-    if (b.unit == 'km' || b.unit == 'mi') {
-      // 1. Mốc KM: Giảm trọng số tin cậy xuống 0.01 (100 lần)
-      weight = 0.01; 
-      // 2. Vùng đệm 50 mét (do làm tròn hàng trăm mét: sai số +-50m)
-      diff = max(0.0, diff - 50.0); 
-    } else {
-      // 1. Mốc MÉT: Độ tin cậy tuyệt đối
-      weight = 1.0;
-      // 2. Vùng đệm 5 mét (do làm tròn hàng chục mét: sai số +-5m)
-      diff = max(0.0, diff - 5.0); 
+      // THUẬT TOÁN ĐÃ ĐƯỢC TÙY CHỈNH: Trọng số theo đơn vị & Vùng đệm mất mát (Epsilon Loss)
+      double weight = 1.0;
+      if (b.unit == 'km' || b.unit == 'mi') {
+        // Mốc KM bị giảm độ tin cậy xuống 100 lần.
+        weight = 0.01; 
+        // Cho phép khoảng cách thực tế dao động +-50 mét quanh bán kính nhập vào (vì làm tròn hàng trăm mét)
+        diff = max(0.0, diff - 50.0); 
+      } else {
+        // Mốc MÉT có độ tin cậy tuyệt đối.
+        weight = 1.0;
+        // Cho phép dao động +-5 mét (vì làm tròn chục mét)
+        diff = max(0.0, diff - 5.0); 
+      }
+
+      error += weight * pow(diff, 2);
     }
-
-    error += weight * pow(diff, 2);
+    return error;
   }
-  return error;
-}
 
   void _requestFocus(int index) {
     Future.delayed(const Duration(milliseconds: 100), () {

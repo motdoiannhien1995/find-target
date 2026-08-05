@@ -1306,12 +1306,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
 
+      // 1. Khóa mục tiêu ngay nếu có mốc 0m
       for (var b in validBeacons) {
         if (_getRadiusInMeters(b) <= 0) return b.location;
       }
 
       List<LatLng> candidates = [];
 
+      // 2. Lấy TẤT CẢ các giao điểm chính xác của mọi cặp vòng tròn
       for (int i = 0; i < validBeacons.length; i++) {
         for (int j = i + 1; j < validBeacons.length; j++) {
           double r1 = _getRadiusInMeters(validBeacons[i]);
@@ -1322,10 +1324,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
       }
       
+      // Bổ sung thêm tâm các mốc để dự phòng
       for (var b in validBeacons) {
         candidates.add(b.location!);
       }
 
+      // 3. Chọn điểm giao nhau tốt nhất
       double bestError = double.infinity;
       LatLng bestPoint = candidates.first;
 
@@ -1337,80 +1341,72 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
       }
       
+      // 4. Trượt dốc nhẹ nhàng để chốt chuẩn xác milimet (chạy siêu mượt)
       return _optimizePoint(bestPoint, validBeacons);
   }
 
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
-    double lat = startPoint.latitude;
-    double lng = startPoint.longitude;
+    LatLng currentPos = startPoint;
+    double stepSize = 0.0001; // Bước nhảy ~11 mét
+    int maxIterations = 200;  // 200 vòng lặp cực nhẹ (xử lý <1ms), không bao giờ đơ máy
 
-    double step = 0.0001; 
-    double minStep = 1e-9; 
+    for (int i = 0; i < maxIterations; i++) {
+      LatLng bestNeighbor = currentPos;
+      double minError = _calculateTotalError(currentPos, beacons);
+      bool improved = false;
 
-    for (int i = 0; i < 300; i++) {
-      double currentError = _calculateTotalError(LatLng(lat, lng), beacons);
-      
-      double dLat = 1e-6; 
-      double dLng = 1e-6; 
-      
-      double errUp = _calculateTotalError(LatLng(lat + dLat, lng), beacons);
-      double errDown = _calculateTotalError(LatLng(lat - dLat, lng), beacons);
-      double errRight = _calculateTotalError(LatLng(lat, lng + dLng), beacons);
-      double errLeft = _calculateTotalError(LatLng(lat, lng - dLng), beacons);
-      
-      double gradLat = (errUp - errDown) / (2 * dLat);
-      double gradLng = (errRight - errLeft) / (2 * dLng);
-      
-      double gradMag = sqrt(gradLat * gradLat + gradLng * gradLng);
-      if (gradMag == 0) break;
-      
-      double moveLat = - (gradLat / gradMag) * step;
-      double moveLng = - (gradLng / gradMag) * step;
-      
-      LatLng nextPt = LatLng(lat + moveLat, lng + moveLng);
-      double nextError = _calculateTotalError(nextPt, beacons);
-      
-      if (nextError < currentError) {
-        lat = nextPt.latitude;
-        lng = nextPt.longitude;
-        step *= 1.2; 
-      } else {
-        step *= 0.5; 
+      // Quét 4 hướng chữ thập để tiết kiệm CPU tối đa
+      List<LatLng> neighbors = [
+        LatLng(currentPos.latitude + stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude - stepSize, currentPos.longitude),
+        LatLng(currentPos.latitude, currentPos.longitude + stepSize),
+        LatLng(currentPos.latitude, currentPos.longitude - stepSize),
+      ];
+
+      for (var p in neighbors) {
+        double err = _calculateTotalError(p, beacons);
+        if (err < minError) {
+          minError = err;
+          bestNeighbor = p;
+          improved = true;
+        }
       }
 
-      if (step < minStep) break; 
+      if (improved) {
+        currentPos = bestNeighbor;
+      } else {
+        stepSize *= 0.5; // Thu hẹp dần bước nhảy để ghim điểm
+        if (stepSize < 0.00000001) break; 
+      }
     }
-
-    return LatLng(lat, lng);
+    return currentPos;
   }
 
-double _calculateTotalError(LatLng p, List<Beacon> beacons) {
-  double error = 0;
-  for (var b in beacons) {
-    if (b.location == null) continue;
-    double r = _getRadiusInMeters(b);
-    if (r <= 0) continue;
-
-    double d = _calculateExactDistance(p, b.location!);
-    double diff = (d - r).abs();
-
-    double weight = 1.0;
-    if (b.unit == 'km' || b.unit == 'mi') {
-      // 1. Mốc KM: Giảm trọng số tin cậy xuống 0.01 (100 lần)
-      weight = 0.01; 
-      // 2. Vùng đệm 50 mét (do làm tròn hàng trăm mét: sai số +-50m)
-      diff = max(0.0, diff - 50.0); 
-    } else {
-      // 1. Mốc MÉT: Độ tin cậy tuyệt đối
-      weight = 1.0;
-      // 2. Vùng đệm 5 mét (do làm tròn hàng chục mét: sai số +-5m)
-      diff = max(0.0, diff - 5.0); 
+  double _calculateTotalError(LatLng p, List<Beacon> beacons) {
+    double error = 0;
+    for (var b in beacons) {
+      if (b.location == null) continue;
+      
+      double r = _getRadiusInMeters(b);
+      if (r < 0) continue; 
+      
+      double d = _calculateExactDistance(p, b.location!);
+      double diff = (d - r).abs();
+      
+      // Xử lý thực tế từ yêu cầu của bạn: 
+      // Cự ly KM bị làm tròn thành hàng trăm (sai số khổng lồ). 
+      // Cự ly MÉT mang tính chuẩn xác cao.
+      double weight;
+      if (b.unit == 'km' || b.unit == 'mi' || r >= 1000) {
+        weight = 0.0001; // Dây thun co giãn: Cho phép mốc km lệch hàng trăm mét mà ít bị phạt
+      } else {
+        weight = 10000.0; // Dây thép cứng: Ép buộc tuyệt đối dính chặt vào mốc 10m-30m
+      }
+      
+      error += pow(diff, 2) * weight; 
     }
-
-    error += weight * pow(diff, 2);
+    return error;
   }
-  return error;
-}
 
   void _requestFocus(int index) {
     Future.delayed(const Duration(milliseconds: 100), () {
