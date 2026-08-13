@@ -150,22 +150,47 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         }
       },
       onDoubleTap: () async {
-        setState(() {
-          _opacity = 0.0;
-        });
-        try {
-          await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
-        } catch (e) {}
-
-        await Future.delayed(const Duration(seconds: 3));
-
-        if (mounted) {
+        if (isMain) {
           setState(() {
-            _opacity = 0.4;
+            _bgColor = Colors.orange.shade800; 
+            _opacity = 0.8;
+          });
+          
+          FlutterOverlayWindow.shareData('trigger_reset');
+          
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.reload();
+          await prefs.setBool('pending_reset', true); 
+          await prefs.setBool('overlay_is_returning', false);
+          
+          await _launchApp(_myPackage);
+
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              setState(() {
+                _bgColor = Colors.blue.shade800;
+                _opacity = 0.4;
+              });
+            }
+          });
+        } else {
+          setState(() {
+            _opacity = 0.0;
           });
           try {
-            await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+            await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
           } catch (e) {}
+
+          await Future.delayed(const Duration(seconds: 3));
+
+          if (mounted) {
+            setState(() {
+              _opacity = 0.4;
+            });
+            try {
+              await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+            } catch (e) {}
+          }
         }
       },
       onLongPress: () async {
@@ -310,6 +335,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool _isMockDialogShowing = false; 
 
   StreamSubscription<ServiceStatus>? _serviceStatusStreamSubscription;
+  StreamSubscription<dynamic>? _overlaySubscription;
   
   bool _isGpsDialogShowing = false;
   bool _isOverlayActive = false; 
@@ -363,6 +389,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     
     FlutterOverlayWindow.isActive().then((val) {
       if (mounted) setState(() => _isOverlayActive = val);
+    });
+
+    _overlaySubscription = FlutterOverlayWindow.overlayListener.listen((event) async {
+      if (event == 'trigger_reset') {
+        if (mounted) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.reload();
+          await prefs.setBool('pending_reset', false);
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _resetCurrentBeacon();
+          });
+        }
+      }
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -764,6 +803,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _serviceStatusStreamSubscription?.cancel();
+    _overlaySubscription?.cancel();
     _resetSwitchTimer?.cancel(); 
     _mapController.dispose();
     _searchCtrl.dispose();
@@ -823,6 +863,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       if (_isOverlayActive) {
         FlutterOverlayWindow.shareData('to_main');
       }
+
+      SharedPreferences.getInstance().then((prefs) async {
+        await prefs.reload(); // QUAN TRỌNG: Cập nhật dữ liệu mới nhất từ bộ nhớ
+        bool pendingReset = prefs.getBool('pending_reset') ?? false;
+        if (pendingReset) {
+          await prefs.setBool('pending_reset', false); 
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              _resetCurrentBeacon();
+            }
+          });
+        }
+      });
 
       if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -2049,28 +2102,63 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text("Xóa ${_getBeaconName(index)}?"),
-        content: const Text("Dữ liệu của điểm này sẽ bị mất."),
+        content: const Text("Bạn muốn chỉ xóa điểm này hay xóa toàn bộ từ điểm này trở về trước?"),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () { Navigator.pop(ctx); _deleteBeacon(index, deletePrevious: false); },
+            child: const Text("CHỈ XÓA ĐIỂM NÀY", style: TextStyle(color: Colors.white, fontSize: 11)),
+          ),
+          ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () { Navigator.pop(ctx); _deleteBeacon(index); },
-            child: const Text("XÓA", style: TextStyle(color: Colors.white)),
+            onPressed: () { Navigator.pop(ctx); _deleteBeacon(index, deletePrevious: true); },
+            child: const Text("XÓA TỪ ĐÂY VỀ TRƯỚC", style: TextStyle(color: Colors.white, fontSize: 11)),
           ),
         ],
       ),
     );
   }
 
-  void _deleteBeacon(int index) {
+  void _deleteBeacon(int index, {bool deletePrevious = false}) {
     setState(() {
-      if (selectedIndex == index) { _stopMock(); } 
-      else if (selectedIndex != null && selectedIndex! > index) { selectedIndex = selectedIndex! - 1; }
-      beacons[index].dispose();
-      beacons.removeAt(index);
-      targetPoints.clear(); 
+      if (deletePrevious) {
+        if (selectedIndex != null) {
+          if (selectedIndex! <= index) {
+            _stopMock();
+            selectedIndex = null;
+          } else {
+            selectedIndex = selectedIndex! - (index + 1);
+          }
+        }
+        for (int i = 0; i <= index; i++) {
+          beacons[i].dispose();
+        }
+        beacons.removeRange(0, index + 1);
+        
+        if (beacons.isEmpty) {
+          beacons.add(Beacon(unit: defaultUnit));
+        }
+        targetPoints.clear();
+      } else {
+        if (selectedIndex == index) { 
+          _stopMock(); 
+          selectedIndex = null;
+        } 
+        else if (selectedIndex != null && selectedIndex! > index) { 
+          selectedIndex = selectedIndex! - 1; 
+        }
+        beacons[index].dispose();
+        beacons.removeAt(index);
+        
+        if (beacons.isEmpty) {
+          beacons.add(Beacon(unit: defaultUnit));
+        }
+        targetPoints.clear(); 
+      }
     });
-    _showMsg("Đã xóa ${_getBeaconName(index)} cũ");
+    _showMsg(deletePrevious ? "Đã xóa từ ${_getBeaconName(index)} trở về trước" : "Đã xóa ${_getBeaconName(index)}");
     _zoomToFitAll(); 
   }
 
@@ -2466,7 +2554,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
 
                                            if (i < beacons.length - 1 && !isRestartP1) {
                                              for (int j = i + 1; j < beacons.length; j++) {
-                                               beacons[j].dispose();
+                                                beacons[j].dispose();
                                              }
                                              setState(() {
                                                beacons.removeRange(i + 1, beacons.length);
