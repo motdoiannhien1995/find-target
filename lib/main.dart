@@ -211,8 +211,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
       ),
     );
   }
@@ -249,8 +249,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
+        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
       ),
     );
   }
@@ -263,7 +263,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Container(
-            width: 110, 
+            width: 65, // Đã giảm từ 85 xuống 65
             decoration: BoxDecoration(
               color: _bgColor.withOpacity(_opacity), 
               borderRadius: BorderRadius.circular(20),
@@ -288,8 +288,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                   onDoubleTap: _hideOverlayTemporarily,
                   onLongPress: _hideOverlayTemporarily,
                   child: Container(
-                    height: 52, 
-                    margin: const EdgeInsets.only(top: 12, left: 12, right: 12, bottom: 8),
+                    height: 42, 
+                    margin: const EdgeInsets.only(top: 10, left: 6, right: 6, bottom: 6), // Đã giảm margin trái phải
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
                       borderRadius: BorderRadius.circular(12),
@@ -304,7 +304,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                              fontSize: 22, 
+                              fontSize: 18, 
                               fontWeight: FontWeight.bold, 
                               color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)
                           ),
@@ -348,7 +348,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                     ),
                   ),
                 ),
-                Container(width: 80, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)), // Đã giảm width từ 60 xuống 45
                 
                 Column(
                   mainAxisSize: MainAxisSize.min,
@@ -358,14 +358,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                             onTap: () => _distFocus.unfocus(),
                             borderRadius: BorderRadius.circular(20),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                              child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
+                              padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), // Đã giảm padding
+                              child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
                             ),
                           )
                         ]
                       : [
                           _buildMainAppButton(),
-                          Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.15)), 
+                          Container(width: 35, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.15)), // Đã giảm width từ 40 xuống 35
                           _buildTargetAppButton(),
                         ],
                 ),
@@ -1048,7 +1048,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FlutterOverlayWindow.isActive().then((val) async {
         bool isActive = val;
 
-        // MỚI: Tự động mở lại nút nổi nếu đang Play mốc (Mocking) và đã có app liên kết
         if ((selectedIndex != null || isMockingTarget) && targetAppPackage != null && targetAppPackage!.isNotEmpty) {
           if (!isActive) {
             if (mounted) {
@@ -1410,8 +1409,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 230, 
-      width: 120,  
+      height: 190, 
+      width: 75,  // Đã giảm từ 95 xuống 75
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
