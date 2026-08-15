@@ -57,16 +57,30 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   
   double _opacity = 0.4; 
 
+  final TextEditingController _distCtrl = TextEditingController();
+  final FocusNode _distFocus = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _loadTargetFromDisk();
     
+    _distFocus.addListener(() {
+      if (mounted) setState(() {}); 
+      if (_distFocus.hasFocus) {
+        FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+      } else {
+        FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      }
+    });
+
     FlutterOverlayWindow.overlayListener.listen((event) async {
       if (!mounted) return;
       
       try {
-        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        if (!_distFocus.hasFocus) {
+           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        }
       } catch (e) {}
 
       if (event == 'update_packages') {
@@ -88,6 +102,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() => _opacity = 0.4);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _distCtrl.dispose();
+    _distFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _loadTargetFromDisk() async {
@@ -128,92 +149,113 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     }
   }
 
-  Widget _buildButton(IconData icon, String? pkg, bool isMain) {
-    bool isDisabled = !isMain && (pkg == null || pkg.isEmpty);
-    return InkWell(
-      onTap: isDisabled ? null : () async {
-        setState(() {
-          _opacity = 0.4; 
-          _bgColor = isMain ? Colors.blue.shade800 : (pkg == _targetPackage ? Colors.green.shade800 : Colors.deepOrange);
-        });
+  Future<void> _hideOverlayTemporarily() async {
+    _distFocus.unfocus();
+    setState(() {
+      _opacity = 0.0;
+    });
+    try {
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+    } catch (e) {}
 
-        if (isMain) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('overlay_is_returning', false);
-          await _launchApp(_myPackage);
-        } else {
-          if (pkg == _targetPackage) {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setBool('overlay_is_returning', true);
-          }
-          await _launchApp(pkg!);
-        }
+    await Future.delayed(const Duration(seconds: 3));
+
+    if (mounted) {
+      setState(() {
+        _opacity = 0.4;
+      });
+      try {
+        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      } catch (e) {}
+    }
+  }
+
+  Widget _buildMainAppButton() {
+    return InkWell(
+      onTap: () async {
+        _distFocus.unfocus();
+        setState(() {
+          _opacity = 0.4;
+          _bgColor = Colors.blue.shade800;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('overlay_is_returning', false);
+        await _launchApp(_myPackage);
       },
       onDoubleTap: () async {
-        if (isMain) {
-          setState(() {
-            _bgColor = Colors.orange.shade800; 
-            _opacity = 0.8;
-          });
-          
-          FlutterOverlayWindow.shareData('trigger_reset');
-          
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.reload();
-          await prefs.setBool('pending_reset', true); 
-          await prefs.setBool('overlay_is_returning', false);
-          
-          await _launchApp(_myPackage);
-
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              setState(() {
-                _bgColor = Colors.blue.shade800;
-                _opacity = 0.4;
-              });
-            }
-          });
-        } else {
-          setState(() {
-            _opacity = 0.0;
-          });
-          try {
-            await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
-          } catch (e) {}
-
-          await Future.delayed(const Duration(seconds: 3));
-
+        _distFocus.unfocus();
+        setState(() {
+          _bgColor = Colors.orange.shade800;
+          _opacity = 0.8;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        await prefs.setBool('pending_reset', true);
+        await prefs.setBool('overlay_is_returning', false);
+        await _launchApp(_myPackage);
+        Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             setState(() {
+              _bgColor = Colors.blue.shade800;
               _opacity = 0.4;
             });
-            try {
-              await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-            } catch (e) {}
           }
-        }
+        });
       },
       onLongPress: () async {
-        setState(() {
-          _opacity = 0.0;
-        });
+        _distFocus.unfocus();
+        FlutterOverlayWindow.shareData('force_close_overlay');
         try {
-          await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+          await FlutterOverlayWindow.closeOverlay();
         } catch (e) {}
       },
-      borderRadius: BorderRadius.circular(30),
+      borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 18.0),
-        child: Icon(
-          icon, 
-          color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), 
-          size: 26
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
       ),
     );
   }
 
- @override
+  Widget _buildTargetAppButton() {
+    bool isDisabled = (_targetPackage == null || _targetPackage!.isEmpty);
+    return InkWell(
+      onTap: isDisabled ? null : () async {
+        _distFocus.unfocus();
+        setState(() {
+          _opacity = 0.4;
+          _bgColor = Colors.green.shade800;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('overlay_is_returning', true);
+        await _launchApp(_targetPackage!);
+      },
+      onDoubleTap: () async {
+        _distFocus.unfocus();
+        if (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty) {
+          setState(() {
+            _opacity = 0.4;
+            _bgColor = Colors.deepOrange;
+          });
+          await _launchApp(_secondTargetPackage!);
+        }
+      },
+      onLongPress: () async {
+        _distFocus.unfocus();
+        FlutterOverlayWindow.shareData('force_close_overlay');
+        try {
+          await FlutterOverlayWindow.closeOverlay();
+        } catch (e) {}
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
@@ -221,10 +263,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Container(
-            width: 60, 
+            width: 110, 
             decoration: BoxDecoration(
               color: _bgColor.withOpacity(_opacity), 
-              borderRadius: BorderRadius.circular(30),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.0), 
               boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
             ),
@@ -232,17 +274,101 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildButton(Icons.my_location, _myPackage, true),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () async {
+                    try {
+                      await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                      _distFocus.requestFocus();
+                      Future.delayed(const Duration(milliseconds: 100), () {
+                        SystemChannels.textInput.invokeMethod('TextInput.show');
+                      });
+                    } catch (e) {}
+                  },
+                  onDoubleTap: _hideOverlayTemporarily,
+                  onLongPress: _hideOverlayTemporarily,
+                  child: Container(
+                    height: 52, 
+                    margin: const EdgeInsets.only(top: 12, left: 12, right: 12, bottom: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: IgnorePointer(
+                        child: TextField(
+                          controller: _distCtrl,
+                          focusNode: _distFocus,
+                          enableInteractiveSelection: false, 
+                          contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 22, 
+                              fontWeight: FontWeight.bold, 
+                              color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)
+                          ),
+                          decoration: InputDecoration(
+                            hintText: "...",
+                            hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          onChanged: (val) async {
+                            String text = val.toLowerCase();
+                            if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
+                              if (val.trim().isNotEmpty) {
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.reload();
+                                await prefs.setString('pending_dist', val);
+                                await prefs.setBool('overlay_is_returning', false);
+                                
+                                await _launchApp(_myPackage);
+                              }
+                              _distCtrl.clear();
+                              _distFocus.unfocus();
+                            }
+                          },
+                          onSubmitted: (val) async {
+                            if (val.isNotEmpty) {
+                              final prefs = await SharedPreferences.getInstance();
+                              await prefs.reload();
+                              await prefs.setString('pending_dist', val);
+                              await prefs.setBool('overlay_is_returning', false);
+                              
+                              await _launchApp(_myPackage);
+                              
+                              _distCtrl.clear();
+                            }
+                            _distFocus.unfocus();
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Container(width: 80, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
                 
-                if (_targetPackage != null && _targetPackage!.isNotEmpty) ...[
-                  Container(width: 30, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
-                  _buildButton(Icons.layers, _targetPackage, false),
-                ],
-                
-                if (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty) ...[
-                  Container(width: 30, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
-                  _buildButton(Icons.rocket_launch, _secondTargetPackage, false),
-                ],
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: _distFocus.hasFocus
+                      ? [
+                          InkWell(
+                            onTap: () => _distFocus.unfocus(),
+                            borderRadius: BorderRadius.circular(20),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                              child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
+                            ),
+                          )
+                        ]
+                      : [
+                          _buildMainAppButton(),
+                          Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.15)), 
+                          _buildTargetAppButton(),
+                        ],
+                ),
               ],
             ),
           ),
@@ -401,6 +527,24 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             if (mounted) _resetCurrentBeacon();
           });
         }
+      } else if (event is String && event.startsWith('input_dist:')) {
+        String val = event.substring(11).trim();
+        if (mounted) {
+          _handleOverlayDistance(val);
+        }
+      } else if (event == 'force_close_overlay') {
+        if (mounted) {
+          setState(() {
+            _autoShowOverlay = false;
+            _isOverlayActive = false;
+          });
+          _showMsg("Đã tắt nút nổi!");
+        }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('auto_show_overlay', false);
+        try {
+          await FlutterOverlayWindow.closeOverlay();
+        } catch (e) {}
       }
     });
 
@@ -425,6 +569,51 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         _checkAndShowTutorial();
       }
     });
+  }
+
+  Future<void> _handleOverlayDistance(String val) async {
+    String text = val.toLowerCase();
+    if (text.trim().isEmpty) return;
+
+    int targetIndex = selectedIndex ?? (beacons.length - 1);
+    if (targetIndex < 0 || targetIndex >= beacons.length) return;
+
+    bool isRestartP1 = text.contains(',');
+    String numStr = text.replaceAll(RegExp(r'[- km,]'), '').trim();
+
+    if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
+        _showMsg("Sai định dạng số!");
+        return;
+    }
+
+    if (targetIndex < beacons.length - 1 && !isRestartP1) {
+        for (int j = targetIndex + 1; j < beacons.length; j++) {
+            beacons[j].dispose();
+        }
+        setState(() {
+            beacons.removeRange(targetIndex + 1, beacons.length);
+        });
+    }
+
+    beacons[targetIndex].controller.text = numStr;
+    beacons[targetIndex].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
+    
+    bool hasMinus = text.contains('-');
+    bool hasSpace = text.contains(' ');
+    bool hasK = text.contains('k');
+    bool hasM = text.contains('m');
+
+    if (hasMinus || hasK) beacons[targetIndex].unit = 'km';
+    if (hasSpace || hasM) beacons[targetIndex].unit = 'm';
+
+    if (isRestartP1) {
+        setState(() { selectedIndex = targetIndex; });
+        await _restartWithResultAsP1(targetIndex);
+    } else {
+        if (numStr.isNotEmpty) {
+            await _addNewBeacon();
+        }
+    }
   }
 
   void _showGpsBlockingDialog() {
@@ -856,23 +1045,47 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _checkMockOnResume();
       _checkGpsOnResume();
       
-      FlutterOverlayWindow.isActive().then((val) {
-        if (mounted) setState(() => _isOverlayActive = val);
+      FlutterOverlayWindow.isActive().then((val) async {
+        bool isActive = val;
+
+        // MỚI: Tự động mở lại nút nổi nếu đang Play mốc (Mocking) và đã có app liên kết
+        if ((selectedIndex != null || isMockingTarget) && targetAppPackage != null && targetAppPackage!.isNotEmpty) {
+          if (!isActive) {
+            if (mounted) {
+              setState(() {
+                _autoShowOverlay = true;
+              });
+            }
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('auto_show_overlay', true);
+            await _showInvincibleOverlay();
+            isActive = true;
+          }
+        }
+
+        if (mounted) setState(() => _isOverlayActive = isActive);
+        
+        if (isActive) {
+          FlutterOverlayWindow.shareData('to_main');
+        }
       });
-      
-      if (_isOverlayActive) {
-        FlutterOverlayWindow.shareData('to_main');
-      }
 
       SharedPreferences.getInstance().then((prefs) async {
-        await prefs.reload(); // QUAN TRỌNG: Cập nhật dữ liệu mới nhất từ bộ nhớ
+        await prefs.reload(); 
+        
         bool pendingReset = prefs.getBool('pending_reset') ?? false;
         if (pendingReset) {
           await prefs.setBool('pending_reset', false); 
           Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              _resetCurrentBeacon();
-            }
+            if (mounted) _resetCurrentBeacon();
+          });
+        }
+
+        String? pendingDist = prefs.getString('pending_dist');
+        if (pendingDist != null && pendingDist.isNotEmpty) {
+          await prefs.remove('pending_dist');
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _handleOverlayDistance(pendingDist);
           });
         }
       });
@@ -1197,8 +1410,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 300, 
-      width: 100,  
+      height: 230, 
+      width: 120,  
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
@@ -1449,14 +1662,10 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
 
     double weight = 1.0;
     if (b.unit == 'km' || b.unit == 'mi') {
-      // 1. Mốc KM: Giảm trọng số tin cậy xuống 0.01 (100 lần)
       weight = 0.01; 
-      // 2. Vùng đệm 50 mét (do làm tròn hàng trăm mét: sai số +-50m)
       diff = max(0.0, diff - 50.0); 
     } else {
-      // 1. Mốc MÉT: Độ tin cậy tuyệt đối
       weight = 1.0;
-      // 2. Vùng đệm 5 mét (do làm tròn hàng chục mét: sai số +-5m)
       diff = max(0.0, diff - 5.0); 
     }
 
@@ -1671,7 +1880,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
       
       if (!isFixingNext && otherBeacons.length == 1) {
         _resetSwitchTimer?.cancel();
-        _resetSwitchTimer = Timer(const Duration(milliseconds: 1500), () async {
+        _resetSwitchTimer = Timer(const Duration(milliseconds: 500), () async {
           _requestFocus(targetIndex); 
           await _switchToTargetApp();
         });
@@ -2066,7 +2275,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
           textAlign: TextAlign.center, 
           style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.1) 
         ),
-        duration: const Duration(milliseconds: 1500),
+        duration: const Duration(milliseconds: 500),
         behavior: SnackBarBehavior.floating,
         backgroundColor: Colors.black.withOpacity(0.8), 
         elevation: 0, 
