@@ -55,7 +55,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   bool _isReturning = false; 
   Color _bgColor = Colors.blue.shade800;
   
-  double _opacity = 0.4; 
+  double _opacity = 0.85; 
+  Timer? _idleTimer;
+  bool _isTemporarilyHidden = false;
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
@@ -64,13 +66,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   void initState() {
     super.initState();
     _loadTargetFromDisk();
+    _resetIdleTimer();
     
     _distFocus.addListener(() {
       if (mounted) setState(() {}); 
       if (_distFocus.hasFocus) {
         FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+        _resetIdleTimer(); 
       } else {
         FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        _resetIdleTimer(); 
       }
     });
 
@@ -89,26 +94,48 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _isReturning = true;
           _bgColor = Colors.green.shade800;
-          _opacity = 0.4; 
         });
+        _resetIdleTimer();
       } else if (event == 'to_main') {
         setState(() {
           _isReturning = false;
           _bgColor = Colors.blue.shade800;
-          _opacity = 0.4;
         });
+        _resetIdleTimer();
       } else if (event == 'show') {
         await _loadTargetFromDisk(); 
-        setState(() => _opacity = 0.4);
+        _resetIdleTimer();
       }
     });
   }
 
   @override
   void dispose() {
+    _idleTimer?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
+  }
+
+  void _resetIdleTimer() {
+    if (_isTemporarilyHidden) return;
+    _idleTimer?.cancel();
+    
+    if (mounted) {
+      setState(() {
+        _opacity = 0.85; 
+      });
+    }
+
+    if (_distFocus.hasFocus) return; 
+
+    _idleTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && !_isTemporarilyHidden && !_distFocus.hasFocus) {
+        setState(() {
+          _opacity = 0.1; // Mờ cực nhiều khi không tương tác
+        });
+      }
+    });
   }
 
   Future<void> _loadTargetFromDisk() async {
@@ -151,7 +178,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
+    _idleTimer?.cancel();
     setState(() {
+      _isTemporarilyHidden = true;
       _opacity = 0.0;
     });
     try {
@@ -161,12 +190,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     await Future.delayed(const Duration(seconds: 3));
 
     if (mounted) {
+      _isTemporarilyHidden = false;
       setState(() {
-        _opacity = 0.4;
+        _opacity = 0.85;
       });
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
+      _resetIdleTimer();
     }
   }
 
@@ -175,9 +206,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onTap: () async {
         _distFocus.unfocus();
         setState(() {
-          _opacity = 0.4;
           _bgColor = Colors.blue.shade800;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
@@ -186,8 +217,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _distFocus.unfocus();
         setState(() {
           _bgColor = Colors.orange.shade800;
-          _opacity = 0.8;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         await prefs.setBool('pending_reset', true);
@@ -197,7 +228,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           if (mounted) {
             setState(() {
               _bgColor = Colors.blue.shade800;
-              _opacity = 0.4;
             });
           }
         });
@@ -212,7 +242,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
-        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 1.0)), size: 28),
       ),
     );
   }
@@ -223,9 +253,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onTap: isDisabled ? null : () async {
         _distFocus.unfocus();
         setState(() {
-          _opacity = 0.4;
           _bgColor = Colors.green.shade800;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
@@ -234,9 +264,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _distFocus.unfocus();
         if (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty) {
           setState(() {
-            _opacity = 0.4;
             _bgColor = Colors.deepOrange;
           });
+          _resetIdleTimer();
           await _launchApp(_secondTargetPackage!);
         }
       },
@@ -250,7 +280,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
-        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
+        child: Icon(Icons.layers, color: isDisabled ? Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.05 : 0.3)) : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 1.0)), size: 28),
       ),
     );
   }
@@ -259,117 +289,126 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      child: Center(
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Container(
-            width: 65, // Đã giảm từ 85 xuống 65
-            decoration: BoxDecoration(
-              color: _bgColor.withOpacity(_opacity), 
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.5), width: 2.0), 
-              boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : 0.4))], 
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () async {
-                    try {
-                      await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-                      _distFocus.requestFocus();
-                      Future.delayed(const Duration(milliseconds: 100), () {
-                        SystemChannels.textInput.invokeMethod('TextInput.show');
-                      });
-                    } catch (e) {}
-                  },
-                  onDoubleTap: _hideOverlayTemporarily,
-                  onLongPress: _hideOverlayTemporarily,
-                  child: Container(
-                    height: 42, 
-                    margin: const EdgeInsets.only(top: 10, left: 6, right: 6, bottom: 6), // Đã giảm margin trái phải
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: IgnorePointer(
-                        child: TextField(
-                          controller: _distCtrl,
-                          focusNode: _distFocus,
-                          enableInteractiveSelection: false, 
-                          contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 18, 
-                              fontWeight: FontWeight.bold, 
-                              color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)
-                          ),
-                          decoration: InputDecoration(
-                            hintText: "...",
-                            hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
-                          ),
-                          onChanged: (val) async {
-                            String text = val.toLowerCase();
-                            if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
-                              if (val.trim().isNotEmpty) {
+      child: Listener(
+        onPointerDown: (_) => _resetIdleTimer(),
+        onPointerMove: (_) => _resetIdleTimer(),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              width: 60, // Tăng nhẹ từ 50 lên 60
+              decoration: BoxDecoration(
+                color: _bgColor.withOpacity(_opacity), 
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 0.5)), width: 2.0), 
+                boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.0 : 0.4)))], 
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () async {
+                      try {
+                        await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                        _distFocus.requestFocus();
+                        Future.delayed(const Duration(milliseconds: 100), () {
+                          SystemChannels.textInput.invokeMethod('TextInput.show');
+                        });
+                      } catch (e) {}
+                    },
+                    onDoubleTap: _hideOverlayTemporarily,
+                    onLongPress: _hideOverlayTemporarily,
+                    child: Container(
+                      height: 44, // Cân đối lại
+                      margin: const EdgeInsets.only(top: 10, left: 6, right: 6, bottom: 6), 
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 0.8)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: IgnorePointer(
+                          child: TextField(
+                            controller: _distCtrl,
+                            focusNode: _distFocus,
+                            enableInteractiveSelection: false, 
+                            contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 18, // To ra một chút
+                                fontWeight: FontWeight.bold, 
+                                color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 1.0))
+                            ),
+                            decoration: InputDecoration(
+                              hintText: "...",
+                              hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 1.0))),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                            onChanged: (val) async {
+                              _resetIdleTimer();
+                              String text = val.toLowerCase();
+                              if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
+                                if (val.trim().isNotEmpty) {
+                                  final prefs = await SharedPreferences.getInstance();
+                                  await prefs.reload();
+                                  await prefs.setString('pending_dist', val);
+                                  await prefs.setBool('overlay_is_returning', false);
+                                  
+                                  await _launchApp(_myPackage);
+                                }
+                                _distCtrl.clear();
+                                _distFocus.unfocus();
+                              }
+                            },
+                            onSubmitted: (val) async {
+                              _resetIdleTimer();
+                              if (val.isNotEmpty) {
                                 final prefs = await SharedPreferences.getInstance();
                                 await prefs.reload();
                                 await prefs.setString('pending_dist', val);
                                 await prefs.setBool('overlay_is_returning', false);
                                 
                                 await _launchApp(_myPackage);
+                                
+                                _distCtrl.clear();
                               }
-                              _distCtrl.clear();
                               _distFocus.unfocus();
-                            }
-                          },
-                          onSubmitted: (val) async {
-                            if (val.isNotEmpty) {
-                              final prefs = await SharedPreferences.getInstance();
-                              await prefs.reload();
-                              await prefs.setString('pending_dist', val);
-                              await prefs.setBool('overlay_is_returning', false);
-                              
-                              await _launchApp(_myPackage);
-                              
-                              _distCtrl.clear();
-                            }
-                            _distFocus.unfocus();
-                          },
+                            },
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)), // Đã giảm width từ 60 xuống 45
-                
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: _distFocus.hasFocus
-                      ? [
-                          InkWell(
-                            onTap: () => _distFocus.unfocus(),
-                            borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), // Đã giảm padding
-                              child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
-                            ),
-                          )
-                        ]
-                      : [
-                          _buildMainAppButton(),
-                          Container(width: 35, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.15)), // Đã giảm width từ 40 xuống 35
-                          _buildTargetAppButton(),
-                        ],
-                ),
-              ],
+                  Container(width: 40, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 0.3))), 
+                  
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: _distFocus.hasFocus
+                        ? [
+                            InkWell(
+                              onTap: () {
+                                _distFocus.unfocus();
+                                _resetIdleTimer();
+                              },
+                              borderRadius: BorderRadius.circular(20),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), 
+                                child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.15 : 1.0)), size: 28),
+                              ),
+                            )
+                          ]
+                        : [
+                            _buildMainAppButton(),
+                            Container(width: 30, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.1 : 0.15))), 
+                            _buildTargetAppButton(),
+                          ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1409,8 +1448,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 190, 
-      width: 75,  // Đã giảm từ 95 xuống 75
+      height: 210, 
+      width: 65,  
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
@@ -2765,7 +2804,7 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
                                                 beacons[j].dispose();
                                              }
                                              setState(() {
-                                               beacons.removeRange(i + 1, beacons.length);
+                                                beacons.removeRange(i + 1, beacons.length);
                                              });
                                            }
 
