@@ -183,7 +183,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       },
       onLongPress: () async {
         _distFocus.unfocus();
-        await FlutterOverlayWindow.closeOverlay();
+        FlutterOverlayWindow.shareData('force_close_overlay');
+        try {
+          await FlutterOverlayWindow.closeOverlay();
+        } catch (e) {}
       },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
@@ -218,7 +221,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       },
       onLongPress: () async {
         _distFocus.unfocus();
-        await FlutterOverlayWindow.closeOverlay();
+        FlutterOverlayWindow.shareData('force_close_overlay');
+        try {
+          await FlutterOverlayWindow.closeOverlay();
+        } catch (e) {}
       },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
@@ -236,7 +242,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Container(
-            width: 150, 
+            width: 110, // Giảm chiều rộng vì đã chuyển sang sắp xếp dọc
             decoration: BoxDecoration(
               color: _bgColor.withOpacity(_opacity), 
               borderRadius: BorderRadius.circular(20),
@@ -335,23 +341,25 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                     ),
                   ),
                 ),
-                Container(width: 100, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
+                Container(width: 80, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.3)),
                 
+                // Đã chuyển thành Column để các nút sắp xếp dọc
                 Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  mainAxisSize: MainAxisSize.min,
                   children: _distFocus.hasFocus
                       ? [
                           InkWell(
                             onTap: () => _distFocus.unfocus(),
                             borderRadius: BorderRadius.circular(20),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 12.0),
+                              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
                               child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 30),
                             ),
                           )
                         ]
                       : [
                           _buildMainAppButton(),
+                          Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.15)), // Đường gạch mờ phân cách
                           _buildTargetAppButton(),
                         ],
                 ),
@@ -518,6 +526,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         if (mounted) {
           _handleOverlayDistance(val);
         }
+      } else if (event == 'force_close_overlay') {
+        if (mounted) {
+          setState(() {
+            _autoShowOverlay = false;
+            _isOverlayActive = false;
+          });
+          _showMsg("Đã tắt nút nổi!");
+        }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('auto_show_overlay', false);
+        try {
+          await FlutterOverlayWindow.closeOverlay();
+        } catch (e) {}
       }
     });
 
@@ -1366,8 +1387,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 150, 
-      width: 160,  
+      height: 230, // Đã tăng chiều cao do nút giờ được xếp dọc
+      width: 120,  // Đã giảm chiều rộng để gọn hơn
       startPosition: const OverlayPosition(0, -100),
     );
     setState(() => _isOverlayActive = true);
@@ -1618,14 +1639,10 @@ double _calculateTotalError(LatLng p, List<Beacon> beacons) {
 
     double weight = 1.0;
     if (b.unit == 'km' || b.unit == 'mi') {
-      // 1. Mốc KM: Giảm trọng số tin cậy xuống 0.01 (100 lần)
       weight = 0.01; 
-      // 2. Vùng đệm 50 mét (do làm tròn hàng trăm mét: sai số +-50m)
       diff = max(0.0, diff - 50.0); 
     } else {
-      // 1. Mốc MÉT: Độ tin cậy tuyệt đối
       weight = 1.0;
-      // 2. Vùng đệm 5 mét (do làm tròn hàng chục mét: sai số +-5m)
       diff = max(0.0, diff - 5.0); 
     }
 
