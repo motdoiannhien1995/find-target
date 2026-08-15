@@ -56,6 +56,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Color _bgColor = Colors.blue.shade800;
   
   double _opacity = 0.85; 
+  Timer? _idleTimer;
   bool _isShrunk = false;
   bool _isTemporarilyHidden = false;
 
@@ -66,13 +67,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   void initState() {
     super.initState();
     _loadTargetFromDisk();
+    _resetIdleTimer();
     
     _distFocus.addListener(() {
       if (mounted) setState(() {}); 
       if (_distFocus.hasFocus) {
         FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+        _resetIdleTimer(); 
       } else {
         FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        _resetIdleTimer(); 
       }
     });
 
@@ -92,26 +96,55 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           _isReturning = true;
           _bgColor = Colors.green.shade800;
         });
+        _resetIdleTimer();
       } else if (event == 'to_main') {
         setState(() {
           _isReturning = false;
           _bgColor = Colors.blue.shade800;
         });
+        _resetIdleTimer();
       } else if (event == 'show') {
         await _loadTargetFromDisk(); 
+        _resetIdleTimer();
       }
     });
   }
 
   @override
   void dispose() {
+    _idleTimer?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
   }
 
+  void _resetIdleTimer() {
+    if (_isTemporarilyHidden) return;
+    _idleTimer?.cancel();
+    
+    if (mounted) {
+      setState(() {
+        _opacity = 0.85; 
+        _isShrunk = false;
+      });
+    }
+
+    if (_distFocus.hasFocus) return; 
+
+    // Sau 5 giây không tương tác: Thu nhỏ hơn nữa và mờ hơn nữa
+    _idleTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && !_isTemporarilyHidden && !_distFocus.hasFocus) {
+        setState(() {
+          _opacity = 0.15; // Giảm độ mờ sâu hơn nữa
+          _isShrunk = true;
+        });
+      }
+    });
+  }
+
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
+    _idleTimer?.cancel();
     setState(() {
       _isTemporarilyHidden = true;
       _opacity = 0.0;
@@ -124,14 +157,15 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     await Future.delayed(const Duration(seconds: 5));
 
     if (mounted) {
+      _isTemporarilyHidden = false;
       setState(() {
-        _isTemporarilyHidden = false;
         _opacity = 0.85;
         _isShrunk = false;
       });
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
+      _resetIdleTimer();
     }
   }
 
@@ -180,6 +214,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _bgColor = Colors.blue.shade800;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
@@ -189,6 +224,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _bgColor = Colors.orange.shade800;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         await prefs.setBool('pending_reset', true);
@@ -206,33 +242,29 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 32),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0)), size: 32),
       ),
     );
   }
 
   Widget _buildTargetAppButton() {
     bool isDisabled = (_targetPackage == null || _targetPackage!.isEmpty);
-    return GestureDetector(
+    return InkWell(
       onTap: isDisabled ? null : () async {
         _distFocus.unfocus();
         setState(() {
           _bgColor = Colors.green.shade800;
         });
+        _resetIdleTimer();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
       },
-      onDoubleTap: isDisabled ? null : () {
-        // Bấm 2 lần vào nút App liên kết ở giữa để THU NHỎ nút nổi
-        setState(() {
-          _isShrunk = true;
-        });
-      },
       onLongPress: _hideOverlayTemporarily,
+      borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 32),
+        child: Icon(Icons.layers, color: isDisabled ? Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.2 : 0.3)) : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0)), size: 32),
       ),
     );
   }
@@ -245,13 +277,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _bgColor = Colors.deepOrange;
         });
+        _resetIdleTimer();
         await _launchApp(_secondTargetPackage!);
       },
       onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.rocket_launch, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 32),
+        child: Icon(Icons.rocket_launch, color: isDisabled ? Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.2 : 0.3)) : Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0)), size: 32),
       ),
     );
   }
@@ -260,21 +293,21 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onLongPress: _hideOverlayTemporarily, // Nhấn giữ vào bất kỳ đâu trên nút nổi để tạm ẩn trong 5 giây
+      child: Listener(
+        onPointerDown: (_) => _resetIdleTimer(),
+        onPointerMove: (_) => _resetIdleTimer(),
         child: Center(
           child: FittedBox(
             fit: BoxFit.scaleDown,
             child: Container(
-              width: _isShrunk ? 28 : 95, 
+              width: _isShrunk ? 28 : 95, // Thu nhỏ kích thước tối đa
               height: _isShrunk ? 28 : null,
               decoration: BoxDecoration(
                 color: Colors.transparent, 
                 shape: BoxShape.rectangle,
                 borderRadius: _isShrunk ? null : BorderRadius.circular(22),
-                border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
-                boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
+                border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.3 : 0.5)), width: 1.5), 
+                boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.1 : 0.4)))], 
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -297,7 +330,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                         height: 52, 
                         margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
+                          color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.4 : 0.8)),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Center(
@@ -309,15 +342,20 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                               contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
                               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                              style: TextStyle(
+                                  fontSize: 22, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0))
+                              ),
                               decoration: InputDecoration(
                                 hintText: "...",
-                                hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0))),
                                 border: InputBorder.none,
                                 isDense: true,
                                 contentPadding: EdgeInsets.zero,
                               ),
                               onChanged: (val) async {
+                                _resetIdleTimer();
                                 String text = val.toLowerCase();
                                 if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
                                   if (val.trim().isNotEmpty) {
@@ -333,6 +371,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 }
                               },
                               onSubmitted: (val) async {
+                                _resetIdleTimer();
                                 if (val.isNotEmpty) {
                                   final prefs = await SharedPreferences.getInstance();
                                   await prefs.reload();
@@ -351,7 +390,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                       ),
                     ),
                     
-                    Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
+                    Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.2 : 0.3))), 
                   ],
                   
                   Column(
@@ -361,23 +400,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                             InkWell(
                               onTap: () {
                                 _distFocus.unfocus();
+                                _resetIdleTimer();
                               },
                               borderRadius: BorderRadius.circular(20),
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), 
-                                child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 30),
+                                child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.5 : 1.0)), size: 30),
                               ),
                             )
                           ]
                         : (_isShrunk
                             ? [
-                                // Khi thu nhỏ: Chạm 1 lần để mở rộng lại
+                                // SỬ DỤNG GESTUREDETECTOR THUẦN TÚY ĐỂ CHỈ MỞ RỘNG VÀ CHẶN TUYỆT ĐỐI KHÔNG GỌI APP CHÍNH
                                 GestureDetector(
                                   behavior: HitTestBehavior.opaque,
                                   onTap: () {
-                                    setState(() {
-                                      _isShrunk = false;
-                                    });
+                                    _resetIdleTimer();
                                   },
                                   onLongPress: _hideOverlayTemporarily,
                                   child: const Center(
@@ -390,9 +428,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                               ]
                             : [
                                 _buildMainAppButton(),
-                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.1 : 0.15))), 
                                 _buildTargetAppButton(),
-                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : (_opacity < 0.5 ? 0.1 : 0.15))), 
                                 _buildSecondTargetAppButton(),
                               ]),
                   ),
