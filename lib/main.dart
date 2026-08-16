@@ -59,6 +59,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
+  
+  // Bộ đếm thời gian tự động thu nhỏ
+  Timer? _autoShrinkTimer;
 
   @override
   void initState() {
@@ -69,8 +72,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       if (mounted) setState(() {}); 
       if (_distFocus.hasFocus) {
         FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+        _autoShrinkTimer?.cancel(); // Đang gõ chữ thì không tự thu nhỏ
       } else {
         FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        _startAutoShrinkTimer(); // Bỏ gõ chữ thì đếm lại 5 giây
       }
     });
 
@@ -100,6 +105,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
+        _startAutoShrinkTimer();
       } else if (event == 'show') {
         setState(() {
           _isShrunk = false;
@@ -109,19 +115,38 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
         await _loadTargetFromDisk(); 
+        _startAutoShrinkTimer();
       }
     });
+    
+    _startAutoShrinkTimer(); // Khởi động đếm ngược khi vừa mở nút nổi
   }
 
   @override
   void dispose() {
+    _autoShrinkTimer?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
   }
 
+  // Khởi động hoặc khởi động lại đếm ngược 5s để thu nhỏ
+  void _startAutoShrinkTimer() {
+    _autoShrinkTimer?.cancel();
+    if (!mounted || _isShrunk || _isTemporarilyHidden || _distFocus.hasFocus) return;
+
+    _autoShrinkTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && !_distFocus.hasFocus && !_isTemporarilyHidden && !_isShrunk) {
+        setState(() {
+          _isShrunk = true;
+        });
+      }
+    });
+  }
+
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
+    _autoShrinkTimer?.cancel();
     setState(() {
       _isTemporarilyHidden = true;
       _opacity = 0.0;
@@ -143,11 +168,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
+      _startAutoShrinkTimer();
     }
   }
 
   Future<void> _shrinkAndHide() async {
     _distFocus.unfocus();
+    _autoShrinkTimer?.cancel();
     setState(() {
       _isShrunk = true;
       _opacity = 0.0;
@@ -277,142 +304,152 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Container(
-              width: _isShrunk ? 28 : 95, 
-              height: _isShrunk ? 28 : null,
-              decoration: BoxDecoration(
-                color: Colors.transparent, 
-                shape: BoxShape.rectangle,
-                borderRadius: _isShrunk ? null : BorderRadius.circular(22),
-                border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
-                boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (!_isShrunk) ...[
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () async {
-                        try {
-                          await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-                          _distFocus.requestFocus();
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            SystemChannels.textInput.invokeMethod('TextInput.show');
-                          });
-                        } catch (e) {}
-                      },
-                      onLongPress: _shrinkAndHide,
-                      child: Container(
-                        height: 52, 
-                        margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Center(
-                          child: IgnorePointer(
-                            child: TextField(
-                              controller: _distCtrl,
-                              focusNode: _distFocus,
-                              enableInteractiveSelection: false, 
-                              contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
-                              decoration: InputDecoration(
-                                hintText: "...",
-                                hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                              onChanged: (val) async {
-                                String text = val.toLowerCase();
-                                if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
-                                  if (val.trim().isNotEmpty) {
+      child: Listener(
+        onPointerDown: (_) {
+          if (!_isShrunk && !_distFocus.hasFocus) {
+            _startAutoShrinkTimer();
+          }
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Container(
+                width: _isShrunk ? 20 : 95, // Nhỏ hơn nữa (20)
+                height: _isShrunk ? 20 : null,
+                decoration: BoxDecoration(
+                  // Nền đen rất mờ (0.3)
+                  color: _isShrunk ? Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 0.3) : Colors.transparent, 
+                  shape: BoxShape.rectangle,
+                  borderRadius: _isShrunk ? BorderRadius.circular(10) : BorderRadius.circular(22),
+                  border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
+                  boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (!_isShrunk) ...[
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () async {
+                          try {
+                            await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                            _distFocus.requestFocus();
+                            Future.delayed(const Duration(milliseconds: 100), () {
+                              SystemChannels.textInput.invokeMethod('TextInput.show');
+                            });
+                          } catch (e) {}
+                        },
+                        onLongPress: _shrinkAndHide,
+                        child: Container(
+                          height: 52, 
+                          margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Center(
+                            child: IgnorePointer(
+                              child: TextField(
+                                controller: _distCtrl,
+                                focusNode: _distFocus,
+                                enableInteractiveSelection: false, 
+                                contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                decoration: InputDecoration(
+                                  hintText: "...",
+                                  hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onChanged: (val) async {
+                                  String text = val.toLowerCase();
+                                  if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
+                                    if (val.trim().isNotEmpty) {
+                                      final prefs = await SharedPreferences.getInstance();
+                                      await prefs.reload();
+                                      await prefs.setString('pending_dist', val);
+                                      await prefs.setBool('overlay_is_returning', false);
+                                      
+                                      await _launchApp(_myPackage);
+                                    }
+                                    _distCtrl.clear();
+                                    _distFocus.unfocus();
+                                  }
+                                },
+                                onSubmitted: (val) async {
+                                  if (val.isNotEmpty) {
                                     final prefs = await SharedPreferences.getInstance();
                                     await prefs.reload();
                                     await prefs.setString('pending_dist', val);
                                     await prefs.setBool('overlay_is_returning', false);
                                     
                                     await _launchApp(_myPackage);
+                                    
+                                    _distCtrl.clear();
                                   }
-                                  _distCtrl.clear();
                                   _distFocus.unfocus();
-                                }
-                              },
-                              onSubmitted: (val) async {
-                                if (val.isNotEmpty) {
-                                  final prefs = await SharedPreferences.getInstance();
-                                  await prefs.reload();
-                                  await prefs.setString('pending_dist', val);
-                                  await prefs.setBool('overlay_is_returning', false);
-                                  
-                                  await _launchApp(_myPackage);
-                                  
-                                  _distCtrl.clear();
-                                }
-                                _distFocus.unfocus();
-                              },
+                                },
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      
+                      Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
+                    ],
                     
-                    Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
-                  ],
-                  
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: _distFocus.hasFocus
-                        ? [
-                            InkWell(
-                              onTap: () {
-                                _distFocus.unfocus();
-                              },
-                              borderRadius: BorderRadius.circular(20),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), 
-                                child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 30),
-                              ),
-                            )
-                          ]
-                        : (_isShrunk
-                            ? [
-                                _opacity > 0.0
-                                    ? GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: () {
-                                          setState(() {
-                                            _isShrunk = false;
-                                          });
-                                        },
-                                        child: const Center(
-                                          child: Padding(
-                                            padding: EdgeInsets.all(6.0),
-                                            child: Icon(Icons.layers, color: Colors.white24, size: 16),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: _distFocus.hasFocus
+                          ? [
+                              InkWell(
+                                onTap: () {
+                                  _distFocus.unfocus();
+                                },
+                                borderRadius: BorderRadius.circular(20),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), 
+                                  child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 30),
+                                ),
+                              )
+                            ]
+                          : (_isShrunk
+                              ? [
+                                  _opacity > 0.0
+                                      ? GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () {
+                                            setState(() {
+                                              _isShrunk = false;
+                                            });
+                                            _startAutoShrinkTimer(); 
+                                          },
+                                          child: Center(
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(2.0),
+                                              // Icon nhỏ hơn (12) và mờ đi (0.4)
+                                              child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.4), size: 12),
+                                            ),
                                           ),
-                                        ),
-                                      )
-                                    : const SizedBox.shrink(),
-                              ]
-                            : [
-                                _buildMainAppButton(),
-                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
-                                _buildTargetAppButton(),
-                                Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
-                                _buildSecondTargetAppButton(),
-                              ]),
-                  ),
-                ],
+                                        )
+                                      : const SizedBox.shrink(),
+                                ]
+                              : [
+                                  _buildMainAppButton(),
+                                  Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                  _buildTargetAppButton(),
+                                  Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                  _buildSecondTargetAppButton(),
+                                ]),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1074,12 +1111,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return inputVal * unitToMeter[b.unit]!;
   }
 
-  // --- HÀM MỚI: Bù trừ hao bán kính để tìm vùng giao nhau dễ hơn ---
   double _getEffectiveRadius(Beacon b) {
     double r = _getRadiusInMeters(b);
     if (r <= 0) return 0;
-    if (b.unit == 'km') return r + 50.0; // Trung bình của 100m sai số
-    if (b.unit == 'm') return r + 5.0;   // Trung bình của 10m sai số
+    if (b.unit == 'km') return r + 50.0;
+    if (b.unit == 'm') return r + 5.0; 
     if (b.unit == 'mi') return r + 80.0;
     if (b.unit == 'ft') return r + 1.5;
     return r;
@@ -1557,7 +1593,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
       for (int i = 0; i < validBeacons.length; i++) {
         for (int j = i + 1; j < validBeacons.length; j++) {
-          // --- SỬ DỤNG BÁN KÍNH ĐÃ BÙ TRỪ KHI TÌM ĐIỂM GIAO ---
           double r1 = _getEffectiveRadius(validBeacons[i]);
           double r2 = _getEffectiveRadius(validBeacons[j]);
           candidates.addAll(_calculateTwoCircleIntersectionPrecise(
@@ -1588,7 +1623,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     double lat = startPoint.latitude;
     double lng = startPoint.longitude;
 
-    // --- TĂNG BƯỚC NHẢY VÀ SỐ VÒNG LẶP ĐỂ VƯỢT QUA CÁC VÙNG PHẲNG DO SAI SỐ ---
     double step = 0.0005; 
     double minStep = 1e-9; 
 
@@ -1629,7 +1663,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return LatLng(lat, lng);
   }
 
-  // --- HÀM TÍNH SAI SỐ MỚI: DỰA TRÊN DẢI LÀM TRÒN THAY VÌ ĐIỂM CHÍNH XÁC ---
   double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     double error = 0;
     for (var b in beacons) {
@@ -1644,14 +1677,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double rMax = 0;
       double weight = 1.0;
 
-      // Xác định dải khoảng cách thực tế (bù trừ do app gốc làm tròn xuống)
       if (b.unit == 'km') {
         rMin = inputVal * 1000.0;
-        rMax = rMin + 99.0; // Khoảng làm tròn xuống (ví dụ 1.2km -> 1.20 - 1.29km)
+        rMax = rMin + 99.0; 
         weight = 0.01;
       } else if (b.unit == 'm') {
         rMin = inputVal;
-        rMax = rMin + 9.0; // Khoảng làm tròn xuống (ví dụ 30m -> 30m - 39m)
+        rMax = rMin + 9.0; 
         weight = 1.0;
       } else if (b.unit == 'mi') {
         rMin = inputVal * 1609.34;
@@ -1669,8 +1701,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       } else if (d > rMax) {
         diff = d - rMax;
       } else {
-        // Nằm trong vùng giao thoa an toàn, tạo lực hút rất nhẹ về điểm giữa của dải sai số
-        // Điều này giúp tìm ra một điểm cân bằng tối ưu nhất nếu vùng giao nhau quá rộng
         double mid = (rMin + rMax) / 2.0;
         diff = (d - mid).abs() * 0.05; 
       }
@@ -1773,7 +1803,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
           finalPos = LatLng(p.latitude, p.longitude);
         } else {
-          // Dùng bán kính thực hiệu dụng để tìm điểm đè mới
           double distMeters = _getEffectiveRadius(beacons[bestReferenceIndex]);
           double optimalBearing = _calculateOptimalBearing(beacons[bestReferenceIndex].location!, index);
           finalPos = _calculatePointFromBearing(beacons[bestReferenceIndex].location!, distMeters, optimalBearing);
