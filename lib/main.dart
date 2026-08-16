@@ -120,7 +120,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.dispose();
   }
 
-  // Ẩn hoàn toàn trong 3 giây
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
     setState(() {
@@ -225,7 +224,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         });
       },
-      onLongPress: _hideOverlayTemporarily, // Nhấn giữ tạm ẩn 3 giây
+      onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -656,19 +655,18 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
-  // Bảng thông báo ép bật GPS có nút X để tạm tắt
   void _showGpsBlockingDialog() {
     if (!mounted) return;
     _isGpsDialogShowing = true;
     showDialog(
       context: context,
-      barrierDismissible: true, // Cho phép bấm ra ngoài hoặc bấm nút X để tắt tạm
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const SizedBox(width: 24), // căn chỉnh cho tiêu đề nằm giữa
+            const SizedBox(width: 24),
             const Text("Mất Kết Nối GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18), textAlign: TextAlign.center),
             IconButton(
               icon: const Icon(Icons.close, color: Colors.grey),
@@ -1074,6 +1072,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     double inputVal = double.tryParse(b.controller.text.replaceAll(',', '.')) ?? 0;
     if (inputVal == 0) return 0;
     return inputVal * unitToMeter[b.unit]!;
+  }
+
+  // --- HÀM MỚI: Bù trừ hao bán kính để tìm vùng giao nhau dễ hơn ---
+  double _getEffectiveRadius(Beacon b) {
+    double r = _getRadiusInMeters(b);
+    if (r <= 0) return 0;
+    if (b.unit == 'km') return r + 50.0; // Trung bình của 100m sai số
+    if (b.unit == 'm') return r + 5.0;   // Trung bình của 10m sai số
+    if (b.unit == 'mi') return r + 80.0;
+    if (b.unit == 'ft') return r + 1.5;
+    return r;
   }
 
   void _zoomToFitAll() {
@@ -1548,8 +1557,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
       for (int i = 0; i < validBeacons.length; i++) {
         for (int j = i + 1; j < validBeacons.length; j++) {
-          double r1 = _getRadiusInMeters(validBeacons[i]);
-          double r2 = _getRadiusInMeters(validBeacons[j]);
+          // --- SỬ DỤNG BÁN KÍNH ĐÃ BÙ TRỪ KHI TÌM ĐIỂM GIAO ---
+          double r1 = _getEffectiveRadius(validBeacons[i]);
+          double r2 = _getEffectiveRadius(validBeacons[j]);
           candidates.addAll(_calculateTwoCircleIntersectionPrecise(
               validBeacons[i].location!, r1, 
               validBeacons[j].location!, r2));
@@ -1578,10 +1588,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     double lat = startPoint.latitude;
     double lng = startPoint.longitude;
 
-    double step = 0.0001; 
+    // --- TĂNG BƯỚC NHẢY VÀ SỐ VÒNG LẶP ĐỂ VƯỢT QUA CÁC VÙNG PHẲNG DO SAI SỐ ---
+    double step = 0.0005; 
     double minStep = 1e-9; 
 
-    for (int i = 0; i < 300; i++) {
+    for (int i = 0; i < 400; i++) {
       double currentError = _calculateTotalError(LatLng(lat, lng), beacons);
       
       double dLat = 1e-6; 
@@ -1618,23 +1629,50 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return LatLng(lat, lng);
   }
 
+  // --- HÀM TÍNH SAI SỐ MỚI: DỰA TRÊN DẢI LÀM TRÒN THAY VÌ ĐIỂM CHÍNH XÁC ---
   double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     double error = 0;
     for (var b in beacons) {
       if (b.location == null) continue;
-      double r = _getRadiusInMeters(b);
-      if (r <= 0) continue;
+      
+      double inputVal = double.tryParse(b.controller.text.replaceAll(',', '.')) ?? 0;
+      if (inputVal <= 0) continue;
 
       double d = _calculateExactDistance(p, b.location!);
-      double diff = (d - r).abs();
-
+      
+      double rMin = 0;
+      double rMax = 0;
       double weight = 1.0;
-      if (b.unit == 'km' || b.unit == 'mi') {
-        weight = 0.01; 
-        diff = max(0.0, diff - 50.0); 
-      } else {
+
+      // Xác định dải khoảng cách thực tế (bù trừ do app gốc làm tròn xuống)
+      if (b.unit == 'km') {
+        rMin = inputVal * 1000.0;
+        rMax = rMin + 99.0; // Khoảng làm tròn xuống (ví dụ 1.2km -> 1.20 - 1.29km)
+        weight = 0.01;
+      } else if (b.unit == 'm') {
+        rMin = inputVal;
+        rMax = rMin + 9.0; // Khoảng làm tròn xuống (ví dụ 30m -> 30m - 39m)
         weight = 1.0;
-        diff = max(0.0, diff - 5.0); 
+      } else if (b.unit == 'mi') {
+        rMin = inputVal * 1609.34;
+        rMax = rMin + 160.0; 
+        weight = 0.01;
+      } else if (b.unit == 'ft') {
+        rMin = inputVal * 0.3048;
+        rMax = rMin + 3.0;
+        weight = 1.0;
+      }
+
+      double diff = 0;
+      if (d < rMin) {
+        diff = rMin - d;
+      } else if (d > rMax) {
+        diff = d - rMax;
+      } else {
+        // Nằm trong vùng giao thoa an toàn, tạo lực hút rất nhẹ về điểm giữa của dải sai số
+        // Điều này giúp tìm ra một điểm cân bằng tối ưu nhất nếu vùng giao nhau quá rộng
+        double mid = (rMin + rMax) / 2.0;
+        diff = (d - mid).abs() * 0.05; 
       }
 
       error += weight * pow(diff, 2);
@@ -1735,10 +1773,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           Position p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
           finalPos = LatLng(p.latitude, p.longitude);
         } else {
-          LatLng baseLoc = beacons[bestReferenceIndex].location!;
-          double distMeters = _getRadiusInMeters(beacons[bestReferenceIndex]);
-          double optimalBearing = _calculateOptimalBearing(baseLoc, index);
-          finalPos = _calculatePointFromBearing(baseLoc, distMeters, optimalBearing);
+          // Dùng bán kính thực hiệu dụng để tìm điểm đè mới
+          double distMeters = _getEffectiveRadius(beacons[bestReferenceIndex]);
+          double optimalBearing = _calculateOptimalBearing(beacons[bestReferenceIndex].location!, index);
+          finalPos = _calculatePointFromBearing(beacons[bestReferenceIndex].location!, distMeters, optimalBearing);
         }
       }
 
@@ -1786,8 +1824,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     } else if (otherBeacons.length == 2) {
       var b1 = otherBeacons[0];
       var b2 = otherBeacons[1];
-      double r1 = _getRadiusInMeters(b1);
-      double r2 = _getRadiusInMeters(b2);
+      double r1 = _getEffectiveRadius(b1);
+      double r2 = _getEffectiveRadius(b2);
 
       List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
 
@@ -1811,7 +1849,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     } else if (otherBeacons.length == 1) {
       var ref = otherBeacons[0];
-      double r = _getRadiusInMeters(ref);
+      double r = _getEffectiveRadius(ref);
       if (beacons[targetIndex].location != null) {
         double currentBearing = _calculateBearing(ref.location!, beacons[targetIndex].location!);
         double newBearing = (currentBearing + 80.0) % 360.0;
@@ -2597,8 +2635,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       if (b1.location != null && b1.controller.text.isNotEmpty &&
           b2.location != null && b2.controller.text.isNotEmpty) {
           try {
-            double r1 = _getRadiusInMeters(b1);
-            double r2 = _getRadiusInMeters(b2);
+            double r1 = _getEffectiveRadius(b1);
+            double r2 = _getEffectiveRadius(b2);
             List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
             if (intersections.isNotEmpty) {
               finalPos = _optimizePoint(intersections[0], [b1, b2]);
@@ -2615,7 +2653,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
                  double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
                  if (r != null && r >= 0) {
-                      double distMeters = _getRadiusInMeters(prevBeacon);
+                      double distMeters = _getEffectiveRadius(prevBeacon);
                       LatLng center = prevBeacon.location!;
                       double bearing = _calculateOptimalBearing(center, newIndex);
                       finalPos = _calculatePointFromBearing(center, distMeters, bearing);
