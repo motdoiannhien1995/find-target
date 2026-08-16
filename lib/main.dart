@@ -176,6 +176,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
     } catch (e) {}
 
+    FlutterOverlayWindow.shareData('save_history');
+
     await Future.delayed(const Duration(seconds: 3));
 
     if (mounted) {
@@ -637,7 +639,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
 
     _overlaySubscription = FlutterOverlayWindow.overlayListener.listen((event) async {
-      if (event == 'trigger_reset') {
+      if (event == 'save_history') {
+        if (mounted) _saveCurrentToHistory();
+      } else if (event == 'trigger_reset') {
         if (mounted) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.reload();
@@ -687,6 +691,46 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         _showMockPermissionDialog();
       }
     });
+  }
+
+  void _saveCurrentToHistory() {
+    LatLng? playingLoc;
+    String playingName = "";
+
+    if (isMockingTarget && targetPoints.isNotEmpty) { 
+      playingLoc = targetPoints[0]; 
+      playingName = "Mục tiêu đã lưu"; 
+    } else if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) { 
+      playingLoc = beacons[selectedIndex!].location; 
+      playingName = _getBeaconName(selectedIndex!); 
+    }
+
+    if (playingLoc != null) {
+      bool isDuplicate = false;
+      if (historyTargets.isNotEmpty) {
+        var last = historyTargets.first;
+        if (last.location.latitude == playingLoc.latitude && 
+            last.location.longitude == playingLoc.longitude && 
+            last.name == playingName) {
+          isDuplicate = true;
+        }
+      }
+
+      if (!isDuplicate) {
+        setState(() {
+          historyTargets.insert(0, SavedTarget(
+            location: playingLoc!, 
+            name: playingName, 
+            timestamp: DateTime.now(), 
+            address: addressDisplay
+          ));
+          if (historyTargets.length > 50) {
+            historyTargets = historyTargets.sublist(0, 50);
+          }
+        });
+        _saveData();
+      }
+    }
   }
 
   Future<void> _handleOverlayDistance(String val) async {
@@ -2231,6 +2275,173 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
        await prefs.setString('history_targets', encodedHistory);
     }
   }
+
+  Future<void> _backupToCloud() async {
+    if (deviceId == null) {
+      _showMsg("Không nhận diện được thiết bị!");
+      return;
+    }
+    try {
+      _showMsg("Đang sao lưu lên đám mây...");
+      String encodedSaved = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
+      String encodedHistory = jsonEncode(historyTargets.map((e) => e.toJson()).toList());
+      await FirebaseFirestore.instance.collection('devices').doc(deviceId!).set({
+        'backup_saved': encodedSaved,
+        'backup_history': encodedHistory,
+        'last_backup': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      _showMsg("Đã sao lưu thành công!");
+    } catch (e) {
+      _showMsg("Lỗi sao lưu: $e");
+    }
+  }
+
+  Future<void> _restoreFromCloud(StateSetter setModalState) async {
+    if (deviceId == null) {
+      _showMsg("Không nhận diện được thiết bị!");
+      return;
+    }
+    try {
+      _showMsg("Đang tải dữ liệu từ đám mây...");
+      var doc = await FirebaseFirestore.instance.collection('devices').doc(deviceId!).get();
+      if (doc.exists) {
+        String? encodedSaved = doc.data()?['backup_saved'];
+        String? encodedHistory = doc.data()?['backup_history'];
+        
+        bool restored = false;
+        if (encodedSaved != null) {
+          Iterable l = jsonDecode(encodedSaved);
+          savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
+          restored = true;
+        }
+        if (encodedHistory != null) {
+          Iterable l = jsonDecode(encodedHistory);
+          historyTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
+          restored = true;
+        }
+        
+        if (restored) {
+          setState(() {});
+          setModalState(() {});
+          _saveData();
+          _showMsg("Khôi phục Đám mây thành công!");
+        } else {
+          _showMsg("Không tìm thấy bản sao lưu nào.");
+        }
+      } else {
+        _showMsg("Chưa có bản sao lưu trên đám mây.");
+      }
+    } catch (e) {
+      _showMsg("Lỗi tải sao lưu: $e");
+    }
+  }
+
+  void _backupToClipboard() {
+    try {
+      String backupStr = jsonEncode({
+        'saved': savedTargets.map((e) => e.toJson()).toList(),
+        'history': historyTargets.map((e) => e.toJson()).toList(),
+      });
+      String b64 = base64Encode(utf8.encode(backupStr));
+      Clipboard.setData(ClipboardData(text: "FINDTARGET_BACKUP:$b64"));
+      _showMsg("Đã copy mã sao lưu vào bộ nhớ tạm!");
+    } catch (e) {
+      _showMsg("Lỗi tạo mã sao lưu");
+    }
+  }
+
+  Future<void> _restoreFromClipboard(StateSetter setModalState) async {
+    ClipboardData? cData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (cData != null && cData.text != null && cData.text!.startsWith("FINDTARGET_BACKUP:")) {
+      try {
+        String b64 = cData.text!.replaceFirst("FINDTARGET_BACKUP:", "");
+        String jsonStr = utf8.decode(base64Decode(b64));
+        Map<String, dynamic> data = jsonDecode(jsonStr);
+        
+        bool restored = false;
+        if (data.containsKey('saved')) {
+          Iterable l = data['saved'];
+          savedTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
+          restored = true;
+        }
+        if (data.containsKey('history')) {
+          Iterable l = data['history'];
+          historyTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model)));
+          restored = true;
+        }
+        
+        if (restored) {
+          setState(() {});
+          setModalState(() {});
+          _saveData();
+          _showMsg("Khôi phục thành công từ Mã!");
+        } else {
+          _showMsg("Dữ liệu sao lưu bị trống!");
+        }
+      } catch (e) {
+        _showMsg("Mã sao lưu không hợp lệ hoặc bị hỏng!");
+      }
+    } else {
+      _showMsg("Không tìm thấy mã sao lưu trong bộ nhớ tạm!");
+    }
+  }
+
+  void _showBackupDialog(StateSetter setModalState) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Sao lưu & Khôi phục", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        contentPadding: const EdgeInsets.only(top: 15, left: 15, right: 15, bottom: 5),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Đám mây (Theo ID thiết bị hiện tại):", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.cloud_upload, size: 16),
+                  label: const Text("Sao lưu", style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  onPressed: () { Navigator.pop(ctx); _backupToCloud(); },
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.cloud_download, size: 16),
+                  label: const Text("Khôi phục", style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  onPressed: () { Navigator.pop(ctx); _restoreFromCloud(setModalState); },
+                ),
+              ]
+            ),
+            const Divider(height: 30),
+            const Text("Chuyển máy (Dán mã thủ công):", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text("Copy Mã", style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                  onPressed: () { Navigator.pop(ctx); _backupToClipboard(); },
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.paste, size: 16),
+                  label: const Text("Dán Mã", style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
+                  onPressed: () { Navigator.pop(ctx); _restoreFromClipboard(setModalState); },
+                ),
+              ]
+            )
+          ]
+        ),
+        actions: [
+           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG", style: TextStyle(color: Colors.grey)))
+        ]
+      )
+    );
+  }
    
   Future<void> _saveTargetApp(String packageName) async {
     final prefs = await SharedPreferences.getInstance();
@@ -2651,35 +2862,48 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
               color: Colors.white,
               borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20))
             ),
-            child: DefaultTabController(
-              length: 2,
-              child: Column(
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 8),
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(10)),
-                  ),
-                  const TabBar(
-                    labelColor: Colors.blue,
-                    unselectedLabelColor: Colors.grey,
-                    indicatorColor: Colors.blue,
-                    labelStyle: TextStyle(fontWeight: FontWeight.bold),
-                    tabs: [
-                      Tab(icon: Icon(Icons.bookmark), text: "Đã lưu"),
-                      Tab(icon: Icon(Icons.history), text: "Lịch sử"),
+            child: Stack(
+              children: [
+                DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(10)),
+                      ),
+                      const TabBar(
+                        labelColor: Colors.blue,
+                        unselectedLabelColor: Colors.grey,
+                        indicatorColor: Colors.blue,
+                        labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                        tabs: [
+                          Tab(icon: Icon(Icons.bookmark), text: "Đã lưu"),
+                          Tab(icon: Icon(Icons.history), text: "Lịch sử"),
+                        ],
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            _buildTargetList(savedTargets, false, setModalState, ctx),
+                            _buildTargetList(historyTargets, true, setModalState, ctx),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _buildTargetList(savedTargets, false, setModalState, ctx),
-                        _buildTargetList(historyTargets, true, setModalState, ctx),
-                      ],
-                    ),
+                ),
+                Positioned(
+                  top: 5,
+                  right: 5,
+                  child: IconButton(
+                    icon: const Icon(Icons.cloud_sync, color: Colors.blue, size: 28),
+                    tooltip: "Sao lưu & Khôi phục",
+                    onPressed: () => _showBackupDialog(setModalState),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         }
@@ -3432,4 +3656,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} /// OK MỐC LỊCH SỬ VÀ --
+}
