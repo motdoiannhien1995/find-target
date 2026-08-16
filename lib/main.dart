@@ -406,12 +406,15 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   if (text == '-' || text == ' ') {
                                       return; 
                                   }
+                                  
+                                  final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
+                                  bool isCoord = coordRegExp.hasMatch(val.trim());
 
-                                  if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
+                                  if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m') || text.contains(',')) {
                                     if (val.trim().isNotEmpty) {
                                       final prefs = await SharedPreferences.getInstance();
                                       await prefs.reload();
-                                      await prefs.setString('pending_dist', val);
+                                      await prefs.setString('pending_dist', val.trim());
                                       await prefs.setBool('overlay_is_returning', false);
                                       
                                       await _launchApp(_myPackage);
@@ -424,7 +427,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   if (val.isNotEmpty) {
                                     final prefs = await SharedPreferences.getInstance();
                                     await prefs.reload();
-                                    await prefs.setString('pending_dist', val);
+                                    await prefs.setString('pending_dist', val.trim());
                                     await prefs.setBool('overlay_is_returning', false);
                                     
                                     await _launchApp(_myPackage);
@@ -809,7 +812,36 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         return;
     }
 
-    if (text.trim().isEmpty) return;
+    if (val.trim().isEmpty) return;
+
+    // ----- Kiểm tra nhận diện Toạ độ Paste -----
+    final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
+    final match = coordRegExp.firstMatch(val.trim());
+
+    if (match != null) {
+      double lat = double.parse(match.group(1)!.replaceAll(',', '.'));
+      double lng = double.parse(match.group(2)!.replaceAll(',', '.'));
+      LatLng pos = LatLng(lat, lng);
+
+      _autoSaveLastTargetBeforeClearing(); 
+
+      setState(() {
+        beacons = [Beacon(location: pos, dist: "", color: Colors.blue, unit: defaultUnit)];
+        targetPoints.clear();
+        coordDisplay = "0.000000, 0.000000";
+        addressDisplay = "Chưa có vị trí";
+        searchMarker = null;
+        selectedIndex = 0; 
+        isMockingTarget = false;
+      });
+      
+      _mapController.move(pos, 16);
+      await _setMock(pos.latitude, pos.longitude);
+      _showMsg("Đã dán tọa độ và chạy Mốc 1!");
+      _requestFocus(0); 
+      await _switchToTargetApp();
+      return;
+    }
 
     int targetIndex = selectedIndex ?? (beacons.length - 1);
     if (targetIndex < 0 || targetIndex >= beacons.length) return;
@@ -3158,6 +3190,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         String text = val.toLowerCase().trim();
                                         bool isRestartP1 = text.contains(',');
                                         
+                                        final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
+                                        if (coordRegExp.hasMatch(text)) {
+                                            beacons[i].controller.clear();
+                                            _handleOverlayDistance(text);
+                                            return;
+                                        }
+
                                         String numStr = text.replaceAll(',', '').trim();
                                         
                                         if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
@@ -3184,6 +3223,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
                                         if (text == '-' || text == ' ') {
                                            return; 
+                                        }
+
+                                        final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
+                                        if (coordRegExp.hasMatch(val.trim())) {
+                                            beacons[i].controller.clear();
+                                            _handleOverlayDistance(val.trim());
+                                            return;
                                         }
                                         
                                         bool hasMinus = text.contains('-');
