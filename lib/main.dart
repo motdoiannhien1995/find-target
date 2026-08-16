@@ -29,8 +29,6 @@ import 'package:android_id/android_id.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
 
-import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
-
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,7 +78,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       if (!mounted) return;
       
       try {
-        if (!_distFocus.hasFocus && !_isTemporarilyHidden) {
+        if (!_distFocus.hasFocus && !_isTemporarilyHidden && !_isShrunk) {
            await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         }
       } catch (e) {}
@@ -96,8 +94,20 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _isReturning = false;
           _bgColor = Colors.blue.shade800;
+          _isShrunk = false;
+          _opacity = 0.85;
         });
+        try {
+          await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        } catch (e) {}
       } else if (event == 'show') {
+        setState(() {
+          _isShrunk = false;
+          _opacity = 0.85;
+        });
+        try {
+          await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        } catch (e) {}
         await _loadTargetFromDisk(); 
       }
     });
@@ -110,18 +120,20 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.dispose();
   }
 
+  // Ẩn hoàn toàn trong 3 giây
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
     setState(() {
       _isTemporarilyHidden = true;
       _opacity = 0.0;
+      _isShrunk = true;
     });
     
     try {
       await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
     } catch (e) {}
 
-    await Future.delayed(const Duration(seconds: 5));
+    await Future.delayed(const Duration(seconds: 3));
 
     if (mounted) {
       setState(() {
@@ -133,6 +145,17 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
     }
+  }
+
+  Future<void> _shrinkAndHide() async {
+    _distFocus.unfocus();
+    setState(() {
+      _isShrunk = true;
+      _opacity = 0.0;
+    });
+    try {
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+    } catch (e) {}
   }
 
   Future<void> _loadTargetFromDisk() async {
@@ -202,11 +225,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         });
       },
-      onLongPress: () {
-        setState(() {
-          _isShrunk = true;
-        });
-      },
+      onLongPress: _hideOverlayTemporarily, // Nhấn giữ tạm ẩn 3 giây
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -227,11 +246,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
       },
-      onLongPress: () {
-        setState(() {
-          _isShrunk = true;
-        });
-      },
+      onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -250,11 +265,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         });
         await _launchApp(_secondTargetPackage!);
       },
-      onLongPress: () {
-        setState(() {
-          _isShrunk = true;
-        });
-      },
+      onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -298,11 +309,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                           });
                         } catch (e) {}
                       },
-                      onLongPress: () {
-                        setState(() {
-                          _isShrunk = true;
-                        });
-                      },
+                      onLongPress: _shrinkAndHide,
                       child: Container(
                         height: 52, 
                         margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
@@ -381,21 +388,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                           ]
                         : (_isShrunk
                             ? [
-                                // Khi thu nhỏ: Chạm 1 lần để mở rộng lại
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    setState(() {
-                                      _isShrunk = false;
-                                    });
-                                  },
-                                  child: const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(6.0),
-                                      child: Icon(Icons.layers, color: Colors.white24, size: 16),
-                                    ),
-                                  ),
-                                ),
+                                _opacity > 0.0
+                                    ? GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () {
+                                          setState(() {
+                                            _isShrunk = false;
+                                          });
+                                        },
+                                        child: const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(6.0),
+                                            child: Icon(Icons.layers, color: Colors.white24, size: 16),
+                                          ),
+                                        ),
+                                      )
+                                    : const SizedBox.shrink(),
                               ]
                             : [
                                 _buildMainAppButton(),
@@ -492,9 +500,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   final GlobalKey _linkAppKey = GlobalKey(); 
   final GlobalKey _helpKey = GlobalKey(); 
   
-  late TutorialCoachMark tutorialCoachMark;
-  List<TargetFocus> targets = [];
-  bool _isTutorialShowing = false;
   bool _isMockDialogShowing = false; 
 
   StreamSubscription<ServiceStatus>? _serviceStatusStreamSubscription;
@@ -602,8 +607,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       bool isGranted = await platform.invokeMethod('checkMockPermission');
       if (!isGranted) {
         _showMockPermissionDialog();
-      } else {
-        _checkAndShowTutorial();
       }
     });
   }
@@ -653,41 +656,52 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
+  // Bảng thông báo ép bật GPS có nút X để tạm tắt
   void _showGpsBlockingDialog() {
     if (!mounted) return;
     _isGpsDialogShowing = true;
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: const Text("Mất Kết Nối GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-          content: const Text("Bạn vừa tắt Dịch vụ vị trí (GPS).\n\nỨng dụng bắt buộc phải bật GPS để lấy mốc tính toán tọa độ chính xác. Vui lòng bật lại GPS để tiếp tục.", textAlign: TextAlign.center),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              onPressed: () async {
-                await Geolocator.openLocationSettings();
+      barrierDismissible: true, // Cho phép bấm ra ngoài hoặc bấm nút X để tắt tạm
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const SizedBox(width: 24), // căn chỉnh cho tiêu đề nằm giữa
+            const Text("Mất Kết Nối GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18), textAlign: TextAlign.center),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.grey),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _isGpsDialogShowing = false;
               },
-              child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
-            TextButton(
-              onPressed: () async {
-                bool enabled = await Geolocator.isLocationServiceEnabled();
-                if (enabled) {
-                  Navigator.pop(ctx);
-                  _isGpsDialogShowing = false;
-                } else {
-                  _showMsg("Bạn chưa bật GPS!");
-                }
-              },
-              child: const Text("Đã bật lại"),
-            )
           ],
         ),
+        content: const Text("Bạn vừa tắt Dịch vụ vị trí (GPS).\n\nỨng dụng bắt buộc phải bật GPS để lấy mốc tính toán tọa độ chính xác. Vui lòng bật lại GPS để tiếp tục.", textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            onPressed: () async {
+              await Geolocator.openLocationSettings();
+            },
+            child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            onPressed: () async {
+              bool enabled = await Geolocator.isLocationServiceEnabled();
+              if (enabled) {
+                Navigator.pop(ctx);
+                _isGpsDialogShowing = false;
+              } else {
+                _showMsg("Bạn chưa bật GPS!");
+              }
+            },
+            child: const Text("Đã bật lại"),
+          )
+        ],
       ),
     );
   }
@@ -715,80 +729,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   Color _getBeaconColor(int index, Color originalColor) {
     if (index < 3) return Colors.blueGrey.shade800; 
     return originalColor;
-  }
-
-  Future<void> _checkAndShowTutorial() async {
-    bool isGranted = await platform.invokeMethod('checkMockPermission');
-    if (!isGranted || _isTutorialShowing) return;
-
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    bool isFirstTime = prefs.getBool('is_first_time_flow_v10') ?? true;
-
-    if (isFirstTime) {
-      _isTutorialShowing = true;
-      _initTargets();
-      _showTutorial();
-      await prefs.setBool('is_first_time_flow_v10', false); 
-    }
-  }
-
-  void _initTargets() {
-    targets = [
-      TargetFocus(
-        identify: "link_app_btn",
-        keyTarget: _linkAppKey,
-        alignSkip: Alignment.topRight,
-        contents: [
-          TargetContent(
-            align: ContentAlign.bottom,
-            builder: (context, controller) => const Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("BƯỚC 1: Liên kết ứng dụng", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
-                SizedBox(height: 10),
-                Text("Nhấn giữ vào biểu tượng này để chọn app dùng để đo khoảng cách.", style: TextStyle(color: Colors.white, fontSize: 16)),
-              ],
-            ),
-          ),
-        ],
-      ),
-      TargetFocus(
-        identify: "help_btn",
-        keyTarget: _helpKey,
-        contents: [
-          TargetContent(
-            align: ContentAlign.bottom,
-            builder: (context, controller) => const Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Bảng hướng dẫn chi tiết", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 22)),
-                SizedBox(height: 10),
-                Text("Bấm vào đây để đọc bảng hướng dẫn chi tiết nhé!", style: TextStyle(color: Colors.white, fontSize: 16)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ];
-  }
-
-  void _showTutorial() {
-    tutorialCoachMark = TutorialCoachMark(
-      targets: targets,
-      colorShadow: Colors.black,
-      opacityShadow: 0.85,
-      textSkip: "ĐÃ HIỂU",
-      paddingFocus: 10,
-      onFinish: () {
-        _isTutorialShowing = false;
-      },
-      onSkip: () {
-        _isTutorialShowing = false;
-        return true;
-      },
-    )..show(context: context);
   }
 
   Future<void> _showMockPermissionDialog() async {
@@ -880,7 +820,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           _isMockDialogShowing = false;
           _showMsg("Đã cấp quyền thành công!");
         }
-        _checkAndShowTutorial();
       } else {
         _stopMock();
         if (_isMockDialogShowing) {
@@ -2116,29 +2055,42 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         _isGpsDialogShowing = true;
         await showDialog(
           context: context,
-          barrierDismissible: false,
-          builder: (ctx) => PopScope(
-            canPop: false, 
-            child: AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              title: const Text("Bắt Buộc Bật GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-              content: const Text("Ứng dụng cần bạn bật Dịch vụ vị trí (GPS) để có thể định vị bản đồ và tính toán tọa độ.\n\nVui lòng bật GPS để có thể tiếp tục sử dụng app.", textAlign: TextAlign.center),
-              actionsAlignment: MainAxisAlignment.center,
-              actions: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                  onPressed: () async {
-                    await Geolocator.openLocationSettings();
+          barrierDismissible: true,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const SizedBox(width: 24),
+                const Text("Bắt Buộc Bật GPS", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18), textAlign: TextAlign.center),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _isGpsDialogShowing = false;
                   },
-                  child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text("Đã bật, thử lại"),
-                )
               ],
             ),
-          )
+            content: const Text("Ứng dụng cần bạn bật Dịch vụ vị trí (GPS) để có thể định vị bản đồ và tính toán tọa độ.\n\nVui lòng bật GPS để có thể tiếp tục sử dụng app.", textAlign: TextAlign.center),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                onPressed: () async {
+                  await Geolocator.openLocationSettings();
+                },
+                child: const Text("Mở Cài đặt GPS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _isGpsDialogShowing = false;
+                },
+                child: const Text("Đã bật, thử lại"),
+              )
+            ],
+          ),
         );
         _isGpsDialogShowing = false;
         continue; 

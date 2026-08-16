@@ -24,6 +24,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // --- BẬT TÍNH NĂNG DESUGARING TẠI ĐÂY ---
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -72,6 +74,9 @@ flutter {
 }
 
 dependencies {
+    // --- THÊM THƯ VIỆN HỖ TRỢ DESUGARING TẠI ĐÂY ---
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
     // Cấu hình Firebase cho hệ thống thu phí
     implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
     implementation("com.google.firebase:firebase-analytics")
