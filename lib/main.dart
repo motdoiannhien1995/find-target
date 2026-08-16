@@ -316,13 +316,12 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: Container(
-                width: _isShrunk ? 20 : 95, // Nhỏ hơn nữa (20)
+                width: _isShrunk ? 20 : 95, // Vùng chạm thu lại còn 20
                 height: _isShrunk ? 20 : null,
                 decoration: BoxDecoration(
-                  // Nền đen rất mờ (0.3)
-                  color: _isShrunk ? Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 0.3) : Colors.transparent, 
+                  color: Colors.transparent, // Hoàn toàn không có nền tròn hay vuông
                   shape: BoxShape.rectangle,
-                  borderRadius: _isShrunk ? BorderRadius.circular(10) : BorderRadius.circular(22),
+                  borderRadius: _isShrunk ? null : BorderRadius.circular(22),
                   border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
                   boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
                 ),
@@ -432,9 +431,19 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                           },
                                           child: Center(
                                             child: Padding(
-                                              padding: const EdgeInsets.all(2.0),
-                                              // Icon nhỏ hơn (12) và mờ đi (0.4)
-                                              child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.4), size: 12),
+                                              padding: const EdgeInsets.all(0.0),
+                                              child: Icon(
+                                                Icons.layers, 
+                                                color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.75), // Cho màu trắng sáng lên một chút cho sạch
+                                                size: 16,
+                                                shadows: _opacity > 0.0 ? [
+                                                  // Viền nhạt (opacity 0.35), độ lệch cực mảnh (0.2) và bo sắc nét (blur 0.1)
+                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(0.2, 0.2)),
+                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(-0.2, -0.2)),
+                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(0.2, -0.2)),
+                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(-0.2, 0.2)),
+                                                ] : [],
+                                              ),
                                             ),
                                           ),
                                         )
