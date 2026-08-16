@@ -434,15 +434,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                               padding: const EdgeInsets.all(0.0),
                                               child: Icon(
                                                 Icons.layers, 
-                                                color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.75), // Cho màu trắng sáng lên một chút cho sạch
+                                                // Chuyển sang màu xám đậm (shade700) mờ 60% để trung tính, không bị lóa
+                                                color: Colors.grey.shade700.withOpacity(_opacity == 0.0 ? 0.0 : 0.6), 
                                                 size: 16,
-                                                shadows: _opacity > 0.0 ? [
-                                                  // Viền nhạt (opacity 0.35), độ lệch cực mảnh (0.2) và bo sắc nét (blur 0.1)
-                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(0.2, 0.2)),
-                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(-0.2, -0.2)),
-                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(0.2, -0.2)),
-                                                  Shadow(color: Colors.black.withOpacity(0.35), blurRadius: 0.1, offset: const Offset(-0.2, 0.2)),
-                                                ] : [],
                                               ),
                                             ),
                                           ),
