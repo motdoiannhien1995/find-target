@@ -410,11 +410,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
                                   bool isCoord = coordRegExp.hasMatch(val.trim());
 
-                                  if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m') || text.contains(',')) {
+                                  if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
                                     if (val.trim().isNotEmpty) {
                                       final prefs = await SharedPreferences.getInstance();
                                       await prefs.reload();
-                                      await prefs.setString('pending_dist', val.trim());
+                                      await prefs.setString('pending_dist', val);
                                       await prefs.setBool('overlay_is_returning', false);
                                       
                                       await _launchApp(_myPackage);
@@ -427,7 +427,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   if (val.isNotEmpty) {
                                     final prefs = await SharedPreferences.getInstance();
                                     await prefs.reload();
-                                    await prefs.setString('pending_dist', val.trim());
+                                    await prefs.setString('pending_dist', val);
                                     await prefs.setBool('overlay_is_returning', false);
                                     
                                     await _launchApp(_myPackage);
