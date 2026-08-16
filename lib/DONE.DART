@@ -736,47 +736,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
-  // --- HÀM MỚI TỐI ƯU SIÊU TỐC & BẢO ĐẢM 100% ---
-  Future<void> _waitForSystemLocation(LatLng target) async {
-    bool matched = false;
-    int attempts = 0;
-    
-    // Bắn lệnh liên tục để ÉP Android nhả toạ độ mới ra ngay lập tức
-    while (!matched && attempts < 25) {
-      try {
-        // getCurrentPosition ép hệ thống phải đọc GPS hiện tại thay vì dùng cache cũ
-        Position p = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high, 
-            timeLimit: const Duration(milliseconds: 150));
-            
-        if (_calculateExactDistance(target, LatLng(p.latitude, p.longitude)) <= 30.0) {
-           matched = true;
-           if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude));
-           break;
-        }
-      } catch (e) {
-        // Lỗi timeout thì lờ đi chạy tiếp
-      }
-      
-      // Đồng thời check luồng Stream chạy ngầm xem có khớp chưa
-      if (!matched && myRealLocation != null) {
-        if (_calculateExactDistance(target, myRealLocation!) <= 30.0) {
-           matched = true;
-           break;
-        }
-      }
-      
-      if (!matched) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        attempts++;
-      }
-    }
-    
-    // Chốt hạ thêm 200ms để chắc chắn 100% toạ độ đã "ngấm" vào toàn bộ hệ thống
-    // Khoảng thời gian này rất ngắn (0.2s) nên vẫn đem lại cảm giác tức thì
-    await Future.delayed(const Duration(milliseconds: 200));
-  }
-
   Future<void> _handleOverlayDistance(String val) async {
     String text = val.toLowerCase();
 
@@ -1254,8 +1213,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('overlay_is_returning', true);
 
-    // Chừa 50ms cho phép Android kịp render xử lý nhảy App
-    await Future.delayed(const Duration(milliseconds: 50)); 
+    await Future.delayed(const Duration(milliseconds: 500)); 
     
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
@@ -1702,7 +1660,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
 
     try { 
-      // Gửi lệnh Mock xuống Native Android
       await platform.invokeMethod('setMockLocation', {"lat": lat, "lng": lng}); 
     } catch (e) { 
       print("Lỗi Mock: $e"); 
@@ -1713,9 +1670,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          return; 
       }
     }
-
-    // ĐỢI HỆ THỐNG ANDROID THỰC SỰ UPDATE VỊ TRÍ MỚI CHO PHÉP CHUYỂN BƯỚC TIẾP THEO
-    await _waitForSystemLocation(LatLng(lat, lng));
     
     if (targetAppPackage != null && targetAppPackage!.isNotEmpty) {
       if (_autoShowOverlay) {
@@ -1727,7 +1681,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
     
-    // Gọi lệnh lấy tên đường nhưng KHÔNG DÙNG "await" để thả trôi ngầm, đảm bảo chuyển app siêu tốc
     _updateCurrentInfo(LatLng(lat, lng));
 
     if (mounted) {
@@ -2181,8 +2134,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          _showMsg("Đã cập nhật lại vị trí ${_getBeaconName(targetIndex)}!");
       }
       
-      _requestFocus(targetIndex); 
-      await _switchToTargetApp(); 
+      if (!isFixingNext && otherBeacons.length == 1) {
+        _resetSwitchTimer?.cancel();
+        _resetSwitchTimer = Timer(const Duration(milliseconds: 500), () async {
+          _requestFocus(targetIndex); 
+          await _switchToTargetApp();
+        });
+      } else {
+        _requestFocus(targetIndex); 
+        await _switchToTargetApp(); 
+      }
     } else {
       _showMsg("Không đủ dữ liệu để tính lại! Cần ít nhất 1-2 điểm khác.");
     }
