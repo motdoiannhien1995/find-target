@@ -120,6 +120,50 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.dispose();
   }
 
+  Future<void> _saveHistoryFromOverlay() async {
+     try {
+         final prefs = await SharedPreferences.getInstance();
+         await prefs.reload();
+         String? playingStr = prefs.getString('current_playing_target');
+         if (playingStr != null && playingStr.isNotEmpty) {
+             Map<String, dynamic> playingData = jsonDecode(playingStr);
+
+             String? historyStr = prefs.getString('history_targets');
+             List<dynamic> historyList = [];
+             if (historyStr != null && historyStr.isNotEmpty) {
+                 historyList = jsonDecode(historyStr);
+             }
+
+             Map<String, dynamic> newTarget = {
+                 'lat': playingData['lat'],
+                 'lng': playingData['lng'],
+                 'name': playingData['name'],
+                 'time': DateTime.now().toIso8601String(),
+                 'id': DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(100).toString(),
+                 'address': playingData['address'] ?? "",
+             };
+
+             bool isDuplicate = false;
+             if (historyList.isNotEmpty) {
+                 var first = historyList[0];
+                 if (first['lat'] == newTarget['lat'] && first['lng'] == newTarget['lng'] && first['name'] == newTarget['name']) {
+                     isDuplicate = true;
+                 }
+             }
+
+             if (!isDuplicate) {
+                 historyList.insert(0, newTarget);
+                 if (historyList.length > 50) {
+                     historyList = historyList.sublist(0, 50);
+                 }
+                 await prefs.setString('history_targets', jsonEncode(historyList));
+             }
+         }
+     } catch (e) {
+         print("Lỗi lưu history từ overlay: $e");
+     }
+  }
+
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
     setState(() {
@@ -155,6 +199,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     try {
       await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
     } catch (e) {}
+    _saveHistoryFromOverlay();
   }
 
   Future<void> _loadTargetFromDisk() async {
@@ -283,6 +328,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             setState(() {
               _isShrunk = true;
             });
+            _saveHistoryFromOverlay();
           }
         },
         child: GestureDetector(
@@ -343,6 +389,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 ),
                                 onChanged: (val) async {
                                   String text = val.toLowerCase();
+                                  
+                                  if (text == '--' || text == '  ') {
+                                     final prefs = await SharedPreferences.getInstance();
+                                     await prefs.reload();
+                                     await prefs.setString('pending_dist', text);
+                                     await prefs.setBool('overlay_is_returning', false);
+                                     await _launchApp(_myPackage);
+                                     _distCtrl.clear();
+                                     _distFocus.unfocus();
+                                     return;
+                                  }
+
+                                  if (text == '-' || text == ' ') {
+                                      return; 
+                                  }
+
                                   if (text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
                                     if (val.trim().isNotEmpty) {
                                       final prefs = await SharedPreferences.getInstance();
@@ -606,6 +668,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      SharedPreferences.getInstance().then((prefs) => prefs.remove('current_playing_target'));
       await _initLocation();
       
       _serviceStatusStreamSubscription = Geolocator.getServiceStatusStream().listen((ServiceStatus status) {
@@ -628,6 +691,80 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   Future<void> _handleOverlayDistance(String val) async {
     String text = val.toLowerCase();
+
+    if (text == '--' || text == '  ') {
+        int distanceIndex = selectedIndex ?? (beacons.length - 1);
+        if (distanceIndex > 0 && beacons[distanceIndex].controller.text.isEmpty) {
+            distanceIndex -= 1;
+        }
+        
+        if (distanceIndex >= 0 && distanceIndex < beacons.length) {
+            setState(() {
+                if (text == '--') {
+                    beacons[distanceIndex].unit = 'km';
+                } else if (text == '  ') {
+                    beacons[distanceIndex].unit = 'm';
+                }
+            });
+            
+            int nextIndex = distanceIndex + 1;
+            if (nextIndex < beacons.length && beacons[nextIndex].location != null) {
+                List<Beacon> otherBeacons = [];
+                for (int i = 0; i < beacons.length; i++) {
+                  if (i != nextIndex && beacons[i].location != null && beacons[i].controller.text.isNotEmpty) {
+                    double? d = double.tryParse(beacons[i].controller.text.replaceAll(',', '.'));
+                    if (d != null && d >= 0) otherBeacons.add(beacons[i]);
+                  }
+                }
+                
+                LatLng? newPos;
+                if (otherBeacons.length >= 3) {
+                    newPos = _internalCalculateBestFit();
+                } else if (otherBeacons.length == 2) {
+                    var b1 = otherBeacons[0];
+                    var b2 = otherBeacons[1];
+                    double r1 = _getEffectiveRadius(b1);
+                    double r2 = _getEffectiveRadius(b2);
+                    List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
+                    if (intersections.isNotEmpty) {
+                        LatLng currentPos = beacons[nextIndex].location!;
+                        double d1 = _calculateExactDistance(currentPos, intersections[0]);
+                        double d2 = _calculateExactDistance(currentPos, intersections[1]);
+                        LatLng chosen = (d1 < d2) ? intersections[0] : intersections[1];
+                        newPos = _optimizePoint(chosen, otherBeacons);
+                    }
+                } else if (otherBeacons.length == 1) {
+                    var ref = otherBeacons[0];
+                    double r = _getEffectiveRadius(ref);
+                    if (beacons[nextIndex].location != null) {
+                        double currentBearing = _calculateBearing(ref.location!, beacons[nextIndex].location!);
+                        newPos = _calculatePointFromBearing(ref.location!, r, currentBearing);
+                    } else {
+                        newPos = _calculatePointFromBearing(ref.location!, r, 0);
+                    }
+                }
+                
+                if (newPos != null) {
+                    setState(() {
+                        beacons[nextIndex].location = newPos!;
+                        selectedIndex = nextIndex;
+                    });
+                    _mapController.move(newPos, _mapController.camera.zoom);
+                    await _setMock(newPos.latitude, newPos.longitude);
+                    _zoomToFitAll();
+                    _showMsg("Đã đổi sang ${beacons[distanceIndex].unit} và tính lại!");
+                    _requestFocus(nextIndex);
+                    await _switchToTargetApp();
+                } else {
+                    _showMsg("Đã đổi mốc sang ${beacons[distanceIndex].unit}!");
+                }
+            } else {
+                _showMsg("Đã đổi mốc sang ${beacons[distanceIndex].unit}!");
+            }
+        }
+        return;
+    }
+
     if (text.trim().isEmpty) return;
 
     int targetIndex = selectedIndex ?? (beacons.length - 1);
@@ -1055,6 +1192,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       SharedPreferences.getInstance().then((prefs) async {
         await prefs.reload(); 
         
+        String? encodedHistory = prefs.getString('history_targets');
+        if (encodedHistory != null) {
+          Iterable l = jsonDecode(encodedHistory);
+          if (mounted) {
+            setState(() { historyTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
+          }
+        }
+
         bool pendingReset = prefs.getBool('pending_reset') ?? false;
         if (pendingReset) {
           await prefs.setBool('pending_reset', false); 
@@ -1169,6 +1314,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             addressColor = Colors.black87;
           });
         }
+        SharedPreferences.getInstance().then((prefs) {
+          String? currentStr = prefs.getString('current_playing_target');
+          if (currentStr != null) {
+              Map<String, dynamic> current = jsonDecode(currentStr);
+              if (current['lat'] == pos.latitude && current['lng'] == pos.longitude) {
+                  current['address'] = addr;
+                  prefs.setString('current_playing_target', jsonEncode(current));
+              }
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -1460,12 +1615,23 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
       });
     }
+
+    String playingName = fromTarget ? "Mục tiêu đã lưu" : (selectedIndex != null ? _getBeaconName(selectedIndex!) : "Mục tiêu");
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('current_playing_target', jsonEncode({
+        'lat': lat,
+        'lng': lng,
+        'name': playingName,
+        'address': addressDisplay,
+      }));
+    });
   }
 
   Future<void> _stopMock() async {
     try { 
       await platform.invokeMethod('stopMockLocation'); 
       if (mounted) { setState(() { isMockingTarget = false; selectedIndex = null; }); }
+      SharedPreferences.getInstance().then((prefs) => prefs.remove('current_playing_target'));
       _showMsg("Đã dừng Mock");
     } catch (e) { print(e); }
   }
@@ -1933,11 +2099,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       if (!isDuplicate) {
         setState(() {
           historyTargets.insert(0, SavedTarget(location: lastTarget!, name: name, timestamp: DateTime.now(), address: addressDisplay));
-          if (historyTargets.length > 20) {
-            historyTargets = historyTargets.sublist(0, 20);
+          if (historyTargets.length > 50) {
+            historyTargets = historyTargets.sublist(0, 50);
           }
         });
-        _saveData();
+        _saveData(saveBookmarks: false, saveHistory: true);
       }
     }
   }
@@ -2043,21 +2209,27 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
           ElevatedButton(onPressed: () {
             setState(() => savedTargets.add(SavedTarget(location: pointToSave!, name: nameCtrl.text, timestamp: DateTime.now(), address: addressDisplay)));
-            _saveData(); Navigator.pop(ctx); _showMsg("Đã lưu!");
+            _saveData(saveBookmarks: true, saveHistory: false); 
+            Navigator.pop(ctx); 
+            _showMsg("Đã lưu!");
           }, child: const Text("LƯU")),
         ],
       ),
     );
   }
 
-  Future<void> _saveData() async {
+  Future<void> _saveData({bool saveBookmarks = true, bool saveHistory = true}) async {
     final prefs = await SharedPreferences.getInstance();
     
-    String encodedSaved = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
-    await prefs.setString('saved_targets', encodedSaved);
+    if (saveBookmarks) {
+       String encodedSaved = jsonEncode(savedTargets.map((e) => e.toJson()).toList());
+       await prefs.setString('saved_targets', encodedSaved);
+    }
     
-    String encodedHistory = jsonEncode(historyTargets.map((e) => e.toJson()).toList());
-    await prefs.setString('history_targets', encodedHistory);
+    if (saveHistory) {
+       String encodedHistory = jsonEncode(historyTargets.map((e) => e.toJson()).toList());
+       await prefs.setString('history_targets', encodedHistory);
+    }
   }
    
   Future<void> _saveTargetApp(String packageName) async {
@@ -2264,7 +2436,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("HỦY")),
           ElevatedButton(onPressed: () { 
             setState(() => targetList[index].name = editCtrl.text); 
-            _saveData(); 
+            _saveData(saveBookmarks: !isHistory, saveHistory: isHistory); 
             Navigator.pop(ctx); 
             if (onEdited != null) onEdited();
           }, child: const Text("OK")),
@@ -2284,7 +2456,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("KHÔNG")),
           ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red), onPressed: () { 
             setState(() => targetList.removeAt(index)); 
-            _saveData(); 
+            _saveData(saveBookmarks: !isHistory, saveHistory: isHistory); 
             Navigator.pop(ctx); 
             if (onDeleted != null) onDeleted();
           }, child: const Text("XÓA", style: TextStyle(color: Colors.white))),
@@ -2456,7 +2628,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     );
   }
 
-  void _showSavedTargetsSheet() {
+  void _showSavedTargetsSheet() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    String? encodedHistory = prefs.getString('history_targets');
+    if (encodedHistory != null) {
+      Iterable l = jsonDecode(encodedHistory);
+      setState(() { historyTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
+    }
+
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context, 
       isScrollControlled: true,
@@ -2769,6 +2951,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                       },
                                       onChanged: (val) async {
                                         String text = val.toLowerCase();
+
+                                        if (text == '--' || text == '  ') {
+                                           beacons[i].controller.clear(); 
+                                           _handleOverlayDistance(text);
+                                           return;
+                                        }
+
+                                        if (text == '-' || text == ' ') {
+                                           return; 
+                                        }
                                         
                                         bool hasMinus = text.contains('-');
                                         bool hasSpace = text.contains(' ');
@@ -3240,4 +3432,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} /// OK MỐC LỊCH SỬ VÀ --
