@@ -202,7 +202,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         });
       },
-      onLongPress: _hideOverlayTemporarily,
+      onLongPress: () {
+        setState(() {
+          _isShrunk = true;
+        });
+      },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -213,7 +217,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   Widget _buildTargetAppButton() {
     bool isDisabled = (_targetPackage == null || _targetPackage!.isEmpty);
-    return GestureDetector(
+    return InkWell(
       onTap: isDisabled ? null : () async {
         _distFocus.unfocus();
         setState(() {
@@ -223,13 +227,12 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
       },
-      onDoubleTap: isDisabled ? null : () {
-        // Bấm 2 lần vào nút App liên kết ở giữa để THU NHỎ nút nổi
+      onLongPress: () {
         setState(() {
           _isShrunk = true;
         });
       },
-      onLongPress: _hideOverlayTemporarily,
+      borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
         child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 32),
@@ -247,7 +250,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         });
         await _launchApp(_secondTargetPackage!);
       },
-      onLongPress: _hideOverlayTemporarily,
+      onLongPress: () {
+        setState(() {
+          _isShrunk = true;
+        });
+      },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
@@ -262,7 +269,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       color: Colors.transparent,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onLongPress: _hideOverlayTemporarily, // Nhấn giữ vào bất kỳ đâu trên nút nổi để tạm ẩn trong 5 giây
         child: Center(
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -292,7 +298,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                           });
                         } catch (e) {}
                       },
-                      onLongPress: _hideOverlayTemporarily,
+                      onLongPress: () {
+                        setState(() {
+                          _isShrunk = true;
+                        });
+                      },
                       child: Container(
                         height: 52, 
                         margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
@@ -379,7 +389,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                       _isShrunk = false;
                                     });
                                   },
-                                  onLongPress: _hideOverlayTemporarily,
                                   child: const Center(
                                     child: Padding(
                                       padding: EdgeInsets.all(6.0),
