@@ -59,9 +59,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
-  
-  // Bộ đếm thời gian tự động thu nhỏ
-  Timer? _autoShrinkTimer;
 
   @override
   void initState() {
@@ -72,10 +69,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       if (mounted) setState(() {}); 
       if (_distFocus.hasFocus) {
         FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-        _autoShrinkTimer?.cancel(); // Đang gõ chữ thì không tự thu nhỏ
       } else {
         FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-        _startAutoShrinkTimer(); // Bỏ gõ chữ thì đếm lại 5 giây
       }
     });
 
@@ -105,7 +100,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
-        _startAutoShrinkTimer();
       } else if (event == 'show') {
         setState(() {
           _isShrunk = false;
@@ -115,38 +109,19 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
         await _loadTargetFromDisk(); 
-        _startAutoShrinkTimer();
       }
     });
-    
-    _startAutoShrinkTimer(); // Khởi động đếm ngược khi vừa mở nút nổi
   }
 
   @override
   void dispose() {
-    _autoShrinkTimer?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
   }
 
-  // Khởi động hoặc khởi động lại đếm ngược 5s để thu nhỏ
-  void _startAutoShrinkTimer() {
-    _autoShrinkTimer?.cancel();
-    if (!mounted || _isShrunk || _isTemporarilyHidden || _distFocus.hasFocus) return;
-
-    _autoShrinkTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && !_distFocus.hasFocus && !_isTemporarilyHidden && !_isShrunk) {
-        setState(() {
-          _isShrunk = true;
-        });
-      }
-    });
-  }
-
   Future<void> _hideOverlayTemporarily() async {
     _distFocus.unfocus();
-    _autoShrinkTimer?.cancel();
     setState(() {
       _isTemporarilyHidden = true;
       _opacity = 0.0;
@@ -168,13 +143,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
       } catch (e) {}
-      _startAutoShrinkTimer();
     }
   }
 
   Future<void> _shrinkAndHide() async {
     _distFocus.unfocus();
-    _autoShrinkTimer?.cancel();
     setState(() {
       _isShrunk = true;
       _opacity = 0.0;
@@ -305,9 +278,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return Material(
       color: Colors.transparent,
       child: Listener(
-        onPointerDown: (_) {
+        onPointerMove: (_) {
           if (!_isShrunk && !_distFocus.hasFocus) {
-            _startAutoShrinkTimer();
+            setState(() {
+              _isShrunk = true;
+            });
           }
         },
         child: GestureDetector(
@@ -316,10 +291,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: Container(
-                width: _isShrunk ? 20 : 95, // Vùng chạm thu lại còn 20
-                height: _isShrunk ? 20 : null,
+                width: _isShrunk ? 28 : 95, 
+                height: _isShrunk ? 28 : null,
                 decoration: BoxDecoration(
-                  color: Colors.transparent, // Hoàn toàn không có nền tròn hay vuông
+                  color: Colors.transparent, 
                   shape: BoxShape.rectangle,
                   borderRadius: _isShrunk ? null : BorderRadius.circular(22),
                   border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
@@ -423,18 +398,19 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   _opacity > 0.0
                                       ? GestureDetector(
                                           behavior: HitTestBehavior.opaque,
-                                          onTap: () {
+                                          onTap: () async {
+                                            OverlayPosition? currentPos = await FlutterOverlayWindow.getOverlayPosition();
                                             setState(() {
                                               _isShrunk = false;
                                             });
-                                            _startAutoShrinkTimer(); 
+                                            double targetY = currentPos?.y ?? 0.0;
+                                            await FlutterOverlayWindow.moveOverlay(OverlayPosition(0.0, targetY));
                                           },
                                           child: Center(
                                             child: Padding(
                                               padding: const EdgeInsets.all(0.0),
                                               child: Icon(
                                                 Icons.layers, 
-                                                // Chuyển sang màu xám đậm (shade700) mờ 60% để trung tính, không bị lóa
                                                 color: Colors.grey.shade700.withOpacity(_opacity == 0.0 ? 0.0 : 0.6), 
                                                 size: 16,
                                               ),
