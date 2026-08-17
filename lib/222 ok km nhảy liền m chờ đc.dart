@@ -225,6 +225,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   Future<void> _launchApp(String pkg) async {
     try {
+      bool? success = await InstalledApps.startApp(pkg);
+      if (success == true) return; 
+    } catch (e) {
+      if (mounted) setState(() => _bgColor = Colors.red.shade800);
+    }
+
+    try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$pkg;launchFlags=0x10020000;end");
       if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
@@ -233,13 +240,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$pkg;launchFlags=0x10100000;end");
       if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
-
-    try {
-      bool? success = await InstalledApps.startApp(pkg);
-      if (success == true) return; 
-    } catch (e) {
-      if (mounted) setState(() => _bgColor = Colors.red.shade800);
-    }
   }
 
   Widget _buildMainAppButton() {
@@ -410,7 +410,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
                                   bool isCoord = coordRegExp.hasMatch(val.trim());
 
-                                  // Đã bỏ text.contains(',,') để không nhảy app vội khi gõ ,,
                                   if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
                                     if (val.trim().isNotEmpty) {
                                       final prefs = await SharedPreferences.getInstance();
@@ -745,8 +744,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     bool matched = false;
     int attempts = 0;
     
-    int maxAttempts = jumpDistance < 50.0 ? 10 : 25; 
-    double tolerance = jumpDistance < 50.0 ? 5.0 : 2.0; 
+    // TỐI ƯU HÓA: Giảm maxAttempts cho km để không bị chờ quá lâu, và TĂNG dung sai nhận diện lên 25m cho cự ly km
+    // Điều này sẽ ngắt lệnh chờ GPS gần như ngay lập tức khi chạy km
+    int maxAttempts = jumpDistance < 50.0 ? 10 : 20; 
+    double tolerance = jumpDistance < 50.0 ? 5.0 : 25.0; 
 
     while (!matched && attempts < maxAttempts) {
       try {
@@ -775,7 +776,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
     
-    await Future.delayed(const Duration(milliseconds: 150)); 
+    // Giảm trễ cứng xuống 50ms (chỉ đủ thời gian cho HĐH kịp bắt broadcast)
+    await Future.delayed(const Duration(milliseconds: 50)); 
   }
 
   Future<void> _handleOverlayDistance(String val) async {
@@ -850,7 +852,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         selectedIndex = nextIndex;
                     });
                     _mapController.move(newPos, _mapController.camera.zoom);
-                    await _setMock(newPos.latitude, newPos.longitude);
+                    
+                    bool isMeter = beacons[nextIndex].unit == 'm';
+                    await _setMock(newPos.latitude, newPos.longitude, waitForAddress: isMeter);
+                    
                     _zoomToFitAll();
                     _showMsg("Đã đổi sang ${beacons[distanceIndex].unit} và tính lại!");
                     _requestFocus(nextIndex);
@@ -888,7 +893,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       });
       
       _mapController.move(pos, 16);
-      await _setMock(pos.latitude, pos.longitude);
+      
+      bool isMeter = defaultUnit == 'm';
+      await _setMock(pos.latitude, pos.longitude, waitForAddress: isMeter);
+      
       _showMsg("Đã dán tọa độ và chạy Mốc 1!");
       _requestFocus(0); 
       await _switchToTargetApp();
@@ -898,8 +906,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     int targetIndex = selectedIndex ?? (beacons.length - 1);
     if (targetIndex < 0 || targetIndex >= beacons.length) return;
 
-    bool isRecalculatePrevious = text.contains(',,');
-    bool isRestartP1 = !isRecalculatePrevious && text.contains(',');
+    bool isRestartP1 = text.contains(',');
     String numStr = text.replaceAll(RegExp(r'[- km,]'), '').trim();
 
     if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
@@ -907,7 +914,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         return;
     }
 
-    if (targetIndex < beacons.length - 1 && !isRestartP1 && !isRecalculatePrevious) {
+    if (targetIndex < beacons.length - 1 && !isRestartP1) {
         for (int j = targetIndex + 1; j < beacons.length; j++) {
             beacons[j].dispose();
         }
@@ -916,33 +923,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         });
     }
 
-    bool hasMinus = text.contains('-');
-    bool hasSpace = text.contains(' ');
-    bool hasK = text.contains('k');
-    bool hasM = text.contains('m');
-
-    if (isRecalculatePrevious) {
-        int prevIndex = targetIndex;
-        if (targetIndex > 0) {
-            prevIndex = targetIndex - 1;
-        }
-        
-        beacons[prevIndex].controller.text = numStr;
-        beacons[prevIndex].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
-        
-        if (hasMinus || hasK) beacons[prevIndex].unit = 'km';
-        if (hasSpace || hasM) beacons[prevIndex].unit = 'm';
-
-        setState(() { selectedIndex = targetIndex; });
-        await _resetCurrentBeacon();
-        return;
-    }
-
     beacons[targetIndex].controller.text = numStr;
     beacons[targetIndex].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
     
-    if (hasMinus || hasK) beacons[targetIndex].unit = 'km';
-    if (hasSpace || hasM) beacons[targetIndex].unit = 'm';
+    // TỐI ƯU HÓA: Độ ưu tiên cho việc nhận diện đơn vị, tránh lỗi " - 1.5" thành m
+    bool hasSpace = text.contains(' ');
+    bool hasMinus = text.contains('-');
+    bool hasM = text.contains('m');
+    bool hasK = text.contains('k');
+
+    if (hasSpace) beacons[targetIndex].unit = 'm';
+    if (hasMinus) beacons[targetIndex].unit = 'km'; 
+    if (hasM) beacons[targetIndex].unit = 'm'; 
+    if (hasK) beacons[targetIndex].unit = 'km';
 
     if (isRestartP1) {
         setState(() { selectedIndex = targetIndex; });
@@ -1283,8 +1276,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('overlay_is_returning', true);
 
-    await Future.delayed(const Duration(milliseconds: 50)); 
-    
+    // Xóa delay cứng 50ms giúp nhảy app bốc nhất có thể
+    try {
+       bool? success = await InstalledApps.startApp(targetAppPackage!);
+       if (success == true) return;
+    } catch (e) {
+       print("Lỗi chuyển app bằng InstalledApps: $e");
+    }
+
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
       if (await launchUrl(uri1, mode: LaunchMode.externalApplication)) return;
@@ -1294,12 +1293,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       final Uri uri2 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=$targetAppPackage;launchFlags=0x10100000;end");
       if (await launchUrl(uri2, mode: LaunchMode.externalApplication)) return;
     } catch (e) {}
-    
-    try {
-       await InstalledApps.startApp(targetAppPackage!);
-    } catch (e) {
-       print("Lỗi chuyển app: $e");
-    }
   }
 
   @override
@@ -1750,7 +1743,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     setState(() => _isOverlayActive = true);
   }
 
-  Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
+  Future<void> _setMock(double lat, double lng, {bool fromTarget = false, bool waitForAddress = false}) async {
     if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
@@ -1793,7 +1786,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
     }
     
-    _updateCurrentInfo(LatLng(lat, lng));
+    // TỐI ƯU HÓA: Ép load địa chỉ chạy hoàn toàn độc lập ở Event Loop kế tiếp cho 'km'
+    if (waitForAddress) {
+      await _updateCurrentInfo(LatLng(lat, lng));
+    } else {
+      Future.delayed(Duration.zero, () {
+         if (mounted) _updateCurrentInfo(LatLng(lat, lng));
+      });
+    }
 
     if (mounted) {
       setState(() {
@@ -2087,7 +2087,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _mapController.move(location, 17);
     });
     _requestFocus(targetIndex); 
-    await _setMock(location.latitude, location.longitude);
+    
+    await _setMock(location.latitude, location.longitude, waitForAddress: unitToUse == 'm');
     _showMsg("Đang chạy ${_getBeaconName(targetIndex)}");
   }
 
@@ -2163,7 +2164,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         if (myRealLocation == null && index == 0) { myRealLocation = finalPos; }
       });
       _mapController.move(finalPos, 16);
-      await _setMock(finalPos.latitude, finalPos.longitude);
+      
+      String unitToUse = beacons[index].unit;
+      await _setMock(finalPos.latitude, finalPos.longitude, waitForAddress: unitToUse == 'm');
     } catch (e) { _showMsg("Lỗi"); }
   }
 
@@ -2255,7 +2258,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FocusManager.instance.primaryFocus?.unfocus(); 
       
       _mapController.move(newPos, _mapController.camera.zoom);
-      await _setMock(newPos.latitude, newPos.longitude);
+      
+      bool isMeter = beacons[targetIndex].unit == 'm';
+      await _setMock(newPos.latitude, newPos.longitude, waitForAddress: isMeter);
+      
       _zoomToFitAll();
       
       if (!isFixingNext) {
@@ -2347,7 +2353,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
     
     _mapController.move(newStart, 16);
-    await _setMock(newStart.latitude, newStart.longitude);
+    
+    bool isMeter = unitToKeep == 'm';
+    await _setMock(newStart.latitude, newStart.longitude, waitForAddress: isMeter);
+    
     _showMsg("Đã gán và chạy Mốc 1 mới!");
 
     if (distToKeep.isNotEmpty) {
@@ -3174,6 +3183,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
 
     String defaultNewUnit = beacons.isNotEmpty ? beacons.last.unit : defaultUnit;
+    bool isMeter = defaultNewUnit == 'm';
     LatLng? finalPoint;
 
     if (beacons.length >= 3) {
@@ -3187,7 +3197,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             isMockingTarget = false;
           });
           
-          await _setMock(finalPoint!.latitude, finalPoint!.longitude);
+          await _setMock(finalPoint!.latitude, finalPoint!.longitude, waitForAddress: isMeter);
           _zoomToFitAll();
           _requestFocus(beacons.length - 1); 
           await _switchToTargetApp();
@@ -3244,7 +3254,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         targetPoints.clear();
         isMockingTarget = false;
       });
-      await _setMock(finalPos!.latitude, finalPos!.longitude);
+      await _setMock(finalPos!.latitude, finalPos!.longitude, waitForAddress: isMeter);
       _zoomToFitAll();
       await _switchToTargetApp(); 
     } else {
@@ -3317,9 +3327,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                       },
                                       onSubmitted: (val) async {
                                         String text = val.toLowerCase().trim();
-                                        
-                                        bool isRecalculatePrevious = text.contains(',,');
-                                        bool isRestartP1 = !isRecalculatePrevious && text.contains(',');
+                                        bool isRestartP1 = text.contains(',');
                                         
                                         final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
                                         if (coordRegExp.hasMatch(text)) {
@@ -3328,32 +3336,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                             return;
                                         }
 
-                                        String numStr = text.replaceAll(RegExp(r'[- km,]'), '').trim();
+                                        String numStr = text.replaceAll(',', '').trim();
                                         
                                         if (numStr.isNotEmpty && double.tryParse(numStr) == null) {
                                             _showMsg("Sai định dạng số (vd: dư dấu chấm)!");
-                                            return;
-                                        }
-
-                                        if (isRecalculatePrevious) {
-                                            int prevIndex = i;
-                                            if (i > 0) {
-                                                prevIndex = i - 1;
-                                                beacons[i].controller.clear();
-                                            }
-                                            beacons[prevIndex].controller.text = numStr;
-                                            beacons[prevIndex].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
-                                            
-                                            bool hasMinus = text.contains('-');
-                                            bool hasSpace = text.contains(' ');
-                                            bool hasK = text.contains('k');
-                                            bool hasM = text.contains('m');
-                                            
-                                            if (hasMinus || hasK) beacons[prevIndex].unit = 'km';
-                                            if (hasSpace || hasM) beacons[prevIndex].unit = 'm';
-                                            
-                                            setState(() { selectedIndex = i; });
-                                            await _resetCurrentBeacon();
                                             return;
                                         }
                                         
@@ -3389,11 +3375,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         bool hasSpace = text.contains(' ');
                                         bool hasK = text.contains('k');
                                         bool hasM = text.contains('m');
-                                        bool isRecalculatePrevious = text.contains(',,');
-                                        bool hasComma = !isRecalculatePrevious && text.contains(',');
+                                        bool hasComma = text.contains(',');
 
-                                        // Bỏ isRecalculatePrevious ra khỏi điều kiện chạy tự động
-                                        // Chỉ chạy khi có - space k m
                                         if (hasMinus || hasSpace || hasK || hasM) {
                                            bool isRestartP1 = hasComma;
                                            
@@ -3404,23 +3387,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                               beacons[i].controller.text = val;
                                               beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: val.length));
                                               return; 
-                                           }
-
-                                           if (isRecalculatePrevious) {
-                                                int prevIndex = i;
-                                                if (i > 0) {
-                                                    prevIndex = i - 1;
-                                                    beacons[i].controller.clear();
-                                                }
-                                                beacons[prevIndex].controller.text = numStr;
-                                                beacons[prevIndex].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
-                                                
-                                                if (hasMinus || hasK) beacons[prevIndex].unit = 'km';
-                                                if (hasSpace || hasM) beacons[prevIndex].unit = 'm';
-
-                                                setState(() { selectedIndex = i; });
-                                                await _resetCurrentBeacon();
-                                                return;
                                            }
 
                                            if (i < beacons.length - 1 && !isRestartP1) {
@@ -3435,8 +3401,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                            beacons[i].controller.text = numStr;
                                            beacons[i].controller.selection = TextSelection.fromPosition(TextPosition(offset: numStr.length));
                                            
-                                           if (hasMinus || hasK) beacons[i].unit = 'km';
-                                           if (hasSpace || hasM) beacons[i].unit = 'm';
+                                           // TỐI ƯU HÓA: Mức độ ưu tiên để tránh nhầm -1.5 thành m
+                                           if (hasSpace) beacons[i].unit = 'm';
+                                           if (hasMinus) beacons[i].unit = 'km'; 
+                                           if (hasM) beacons[i].unit = 'm'; 
+                                           if (hasK) beacons[i].unit = 'km';
 
                                            if (isRestartP1) {
                                                setState(() { selectedIndex = i; });
@@ -3645,9 +3614,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                 padding: EdgeInsets.zero, constraints: const BoxConstraints(),
                                 onPressed: isAnyMocking ? _stopMock : () async { 
                                    if (selectedIndex != null && beacons[selectedIndex!].location != null) {
-                                     await _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude);
+                                     String unitToUse = beacons[selectedIndex!].unit;
+                                     await _setMock(beacons[selectedIndex!].location!.latitude, beacons[selectedIndex!].location!.longitude, waitForAddress: unitToUse == 'm');
                                    } else if (targetPoints.isNotEmpty) {
-                                     await _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true);
+                                     await _setMock(targetPoints[0].latitude, targetPoints[0].longitude, fromTarget: true, waitForAddress: false);
                                    }
                                 },
                                 icon: Icon(isAnyMocking ? Icons.stop_circle : Icons.play_circle, color: isAnyMocking ? Colors.red : Colors.green, size: 32),
@@ -3771,6 +3741,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                           }
 
                           int targetIndex = 0;
+                          String unitToUse = 'km';
 
                           setState(() {
                             if (emptyIndex != -1) {
@@ -3782,7 +3753,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               beacons[selectedIndex!].location = latlng;
                               targetIndex = selectedIndex!;
                             } else {
-                              String unitToUse = beacons.isNotEmpty ? beacons.last.unit : 'km';
+                              unitToUse = beacons.isNotEmpty ? beacons.last.unit : 'km';
                               beacons.add(Beacon(location: latlng, color: colorPalette[beacons.length % colorPalette.length], unit: unitToUse));
                               targetIndex = beacons.length - 1;
                               selectedIndex = targetIndex;
@@ -3791,8 +3762,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             targetPoints.clear();
                           });
 
+                          unitToUse = targetIndex >= 0 && targetIndex < beacons.length ? beacons[targetIndex].unit : 'km';
+
                           _requestFocus(targetIndex);
-                          await _setMock(latlng.latitude, latlng.longitude);
+                          await _setMock(latlng.latitude, latlng.longitude, waitForAddress: unitToUse == 'm');
                           _showMsg("Đã gán và MOCK ${_getBeaconName(targetIndex)}");
                         },
                       ),
@@ -3876,4 +3849,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} //// km thì nhảy liền còn mét chờ hiện địa chỉ
