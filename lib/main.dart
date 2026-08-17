@@ -54,8 +54,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   Color _bgColor = Colors.blue.shade800;
   
   double _opacity = 0.85; 
-  bool _isShrunk = false;
+  bool _isShrunk = false; 
   bool _isTemporarilyHidden = false;
+  bool _isLockPositionMode = false; 
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
@@ -94,7 +95,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _isReturning = false;
           _bgColor = Colors.blue.shade800;
-          _isShrunk = false;
+          if (!_isLockPositionMode) _isShrunk = false;
           _opacity = 0.85;
         });
         try {
@@ -102,13 +103,26 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         } catch (e) {}
       } else if (event == 'show') {
         setState(() {
-          _isShrunk = false;
+          if (!_isLockPositionMode) _isShrunk = false;
           _opacity = 0.85;
         });
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
         await _loadTargetFromDisk(); 
+      } else if (event == 'start_position_mode') {
+        setState(() {
+          _isShrunk = false;
+          _isLockPositionMode = true; 
+          _opacity = 0.85;
+        });
+        try {
+          await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        } catch (e) {}
+      } else if (event == 'stop_position_mode') {
+        setState(() {
+          _isLockPositionMode = false; 
+        });
       }
     });
   }
@@ -184,7 +198,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       setState(() {
         _isTemporarilyHidden = false;
         _opacity = 0.85;
-        _isShrunk = false;
+        if (!_isLockPositionMode) _isShrunk = false;
       });
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
@@ -193,6 +207,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 
   Future<void> _shrinkAndHide() async {
+    if (_isLockPositionMode) return; 
     _distFocus.unfocus();
     setState(() {
       _isShrunk = true;
@@ -274,8 +289,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -295,8 +310,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -314,8 +329,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-        child: Icon(Icons.rocket_launch, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        child: Icon(Icons.rocket_launch, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -326,7 +341,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       color: Colors.transparent,
       child: Listener(
         onPointerMove: (_) {
-          if (!_isShrunk && !_distFocus.hasFocus) {
+          if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
             setState(() {
               _isShrunk = true;
             });
@@ -339,12 +354,12 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: Container(
-                width: _isShrunk ? 28 : 95, 
+                width: _isShrunk ? 28 : 85, 
                 height: _isShrunk ? 28 : null,
                 decoration: BoxDecoration(
                   color: Colors.transparent, 
                   shape: BoxShape.rectangle,
-                  borderRadius: _isShrunk ? null : BorderRadius.circular(22),
+                  borderRadius: _isShrunk ? null : BorderRadius.circular(20),
                   border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
                   boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
                 ),
@@ -366,11 +381,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                         },
                         onLongPress: _shrinkAndHide,
                         child: Container(
-                          height: 52, 
-                          margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 6), 
+                          height: 42, 
+                          margin: const EdgeInsets.only(top: 8, left: 6, right: 6, bottom: 4), 
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: Center(
                             child: IgnorePointer(
@@ -381,7 +396,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
                                 decoration: InputDecoration(
                                   hintText: "...",
                                   hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
@@ -442,7 +457,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                         ),
                       ),
                       
-                      Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
+                      Container(width: 55, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
                     ],
                     
                     Column(
@@ -455,8 +470,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 },
                                 borderRadius: BorderRadius.circular(20),
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0), 
-                                  child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 30),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0), 
+                                  child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 26),
                                 ),
                               )
                             ]
@@ -466,12 +481,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                       ? GestureDetector(
                                           behavior: HitTestBehavior.opaque,
                                           onTap: () async {
-                                            OverlayPosition? currentPos = await FlutterOverlayWindow.getOverlayPosition();
                                             setState(() {
                                               _isShrunk = false;
                                             });
-                                            double targetY = currentPos?.y ?? 0.0;
-                                            await FlutterOverlayWindow.moveOverlay(OverlayPosition(0.0, targetY));
+                                            final prefs = await SharedPreferences.getInstance();
+                                            double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+                                            double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+                                            await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
                                           },
                                           child: Center(
                                             child: Padding(
@@ -488,9 +504,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 ]
                               : [
                                   _buildMainAppButton(),
-                                  Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                  Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
                                   _buildTargetAppButton(),
-                                  Container(width: 50, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                  Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
                                   _buildSecondTargetAppButton(),
                                 ]),
                     ),
@@ -590,6 +606,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   bool _isGpsDialogShowing = false;
   bool _isOverlayActive = false; 
   bool _autoShowOverlay = true; 
+  bool _isEditingOverlayPosition = false; 
 
   bool isPro = false;
   int trialCount = 0;
@@ -1736,6 +1753,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       FlutterOverlayWindow.shareData('show'); 
       return;
     }
+    
+    final prefs = await SharedPreferences.getInstance();
+    double startX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+    double startY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
       flag: OverlayFlag.defaultFlag, 
@@ -1744,9 +1766,67 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       positionGravity: PositionGravity.none,
       height: 310, 
       width: 95,
-      startPosition: const OverlayPosition(0, -100),
+      startPosition: OverlayPosition(startX, startY),
     );
     setState(() => _isOverlayActive = true);
+  }
+
+  Future<void> _togglePinOverlayPosition() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    if (!_isEditingOverlayPosition) {
+      setState(() {
+        _isEditingOverlayPosition = true;
+        _autoShowOverlay = true;
+      });
+      await prefs.setBool('auto_show_overlay', true);
+
+      if (!await FlutterOverlayWindow.isActive()) {
+        await _showInvincibleOverlay();
+      } else {
+        FlutterOverlayWindow.shareData('start_position_mode');
+      }
+      setState(() => _isOverlayActive = true);
+      _showMsg("Hãy kéo nút nổi đến vị trí bạn muốn, sau đó bấm lại nút Ghim để LƯU!");
+    } else {
+      try {
+        OverlayPosition? pos = await FlutterOverlayWindow.getOverlayPosition();
+        if (pos != null) {
+          // Giới hạn an toàn (clamp) để nút không bao giờ bị chui tụt lấp lửng ra ngoài màn hình
+          double safeX = pos.x.clamp(0.0, 300.0); 
+          double safeY = pos.y.clamp(-350.0, 500.0);
+
+          await prefs.setDouble('custom_fixed_x', safeX);
+          await prefs.setDouble('custom_fixed_y', safeY);
+          await FlutterOverlayWindow.moveOverlay(OverlayPosition(safeX, safeY));
+          _showMsg("Đã LƯU vị trí cố định thành công!");
+        } else {
+          _showMsg("Không tìm thấy nút nổi trên màn hình!");
+        }
+      } catch (e) {
+        _showMsg("Lỗi lưu vị trí!");
+      }
+
+      setState(() {
+        _isEditingOverlayPosition = false;
+      });
+      FlutterOverlayWindow.shareData('stop_position_mode');
+    }
+  }
+
+  Future<void> _cancelPinOverlayPosition() async {
+    setState(() {
+      _isEditingOverlayPosition = false;
+    });
+    FlutterOverlayWindow.shareData('stop_position_mode');
+
+    final prefs = await SharedPreferences.getInstance();
+    double oldX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+    double oldY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+    if (await FlutterOverlayWindow.isActive()) {
+      await FlutterOverlayWindow.moveOverlay(OverlayPosition(oldX, oldY));
+    }
+    _showMsg("Đã HỦY thay đổi vị trí.");
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
@@ -3391,8 +3471,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                         bool isRecalculatePrevious = text.contains(',,');
                                         bool hasComma = !isRecalculatePrevious && text.contains(',');
 
-                                        // Bỏ isRecalculatePrevious ra khỏi điều kiện chạy tự động
-                                        // Chỉ chạy khi có - space k m
                                         if (hasMinus || hasSpace || hasK || hasM) {
                                            bool isRestartP1 = hasComma;
                                            
@@ -3520,6 +3598,40 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            // Nút Ghim nhỏ gọn
+                            SizedBox(
+                              width: 32,
+                              height: 32,
+                              child: IconButton(
+                                icon: Icon(
+                                  Icons.push_pin, 
+                                  color: _isEditingOverlayPosition ? Colors.green : Colors.amber, 
+                                  size: 20
+                                ),
+                                tooltip: _isEditingOverlayPosition ? "Bấm để Lưu vị trí" : "Bấm để chỉnh vị trí nút nổi",
+                                onPressed: _togglePinOverlayPosition,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // Nút Hủy nhỏ gọn (chỉ hiện khi đang chỉnh vị trí)
+                            if (_isEditingOverlayPosition) ...[
+                              SizedBox(
+                                width: 32,
+                                height: 32,
+                                child: IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.red, size: 20),
+                                  tooltip: "Hủy thay đổi vị trí",
+                                  onPressed: _cancelPinOverlayPosition,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+
                             InkWell(
                               key: const ValueKey("secondApp"),
                               onLongPress: secondTargetAppPackage == null ? _pickSecondTargetApp : _showSecondAppLinkOptions, 
@@ -3544,44 +3656,48 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               },
                               borderRadius: BorderRadius.circular(20),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
                                 child: Icon(
                                   Icons.rocket_launch, 
                                   color: secondTargetAppPackage == null ? Colors.grey : Colors.blueAccent, 
-                                  size: 26
+                                  size: 22
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
 
-                            IconButton(
-                              icon: const Icon(Icons.content_paste_go, color: Colors.blue, size: 26),
-                              onPressed: () async {
-                                ClipboardData? cData = await Clipboard.getData(Clipboard.kTextPlain);
-                                if (cData != null && cData.text != null && cData.text!.isNotEmpty) {
-                                  String query = cData.text!.trim();
-                                  final match = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$').firstMatch(query);
-                                  
-                                  if (match != null) {
-                                    double lat = double.parse(match.group(1)!.replaceAll(',', '.'));
-                                    double lng = double.parse(match.group(2)!.replaceAll(',', '.'));
-                                    LatLng pos = LatLng(lat, lng);
+                            SizedBox(
+                              width: 32,
+                              height: 32,
+                              child: IconButton(
+                                icon: const Icon(Icons.content_paste_go, color: Colors.blue, size: 20),
+                                onPressed: () async {
+                                  ClipboardData? cData = await Clipboard.getData(Clipboard.kTextPlain);
+                                  if (cData != null && cData.text != null && cData.text!.isNotEmpty) {
+                                    String query = cData.text!.trim();
+                                    final match = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$').firstMatch(query);
                                     
-                                    _mapController.move(pos, 15);
-                                    await _assignSavedTargetToP(pos);
-                                    _showMsg("Đã dán tọa độ và chuyển sang App!");
-                                    await _switchToTargetApp(); 
+                                    if (match != null) {
+                                      double lat = double.parse(match.group(1)!.replaceAll(',', '.'));
+                                      double lng = double.parse(match.group(2)!.replaceAll(',', '.'));
+                                      LatLng pos = LatLng(lat, lng);
+                                      
+                                      _mapController.move(pos, 15);
+                                      await _assignSavedTargetToP(pos);
+                                      _showMsg("Đã dán tọa độ và chuyển sang App!");
+                                      await _switchToTargetApp(); 
+                                    } else {
+                                      _showMsg("Nội dung copy không phải là tọa độ hợp lệ!");
+                                    }
                                   } else {
-                                    _showMsg("Nội dung copy không phải là tọa độ hợp lệ!");
+                                    _showMsg("Bộ nhớ tạm đang trống!");
                                   }
-                                } else {
-                                  _showMsg("Bộ nhớ tạm đang trống!");
-                                }
-                              },
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
+                                },
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
 
                             InkWell(
                               key: _linkAppKey, 
@@ -3589,13 +3705,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               onTap: _triggerOverlay,
                               borderRadius: BorderRadius.circular(20),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
                                 child: Icon(
                                   Icons.layers, 
                                   color: targetAppPackage == null 
                                       ? Colors.grey 
                                       : (_autoShowOverlay ? Colors.green : Colors.blueAccent),
-                                  size: 26
+                                  size: 22
                                 ),
                               ),
                             ),
@@ -3875,4 +3991,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} /// công thức
+}
