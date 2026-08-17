@@ -410,7 +410,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
                                   bool isCoord = coordRegExp.hasMatch(val.trim());
 
-                                  // Đã bỏ text.contains(',,') để không nhảy app vội khi gõ ,,
                                   if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
                                     if (val.trim().isNotEmpty) {
                                       final prefs = await SharedPreferences.getInstance();
@@ -1384,49 +1383,49 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   double _getMaxError(Beacon b) {
     double r = _getRadiusInMeters(b);
     if (r <= 0) return 0;
-    
+
     String text = b.controller.text.trim();
     if (b.unit == 'km') {
       if (!text.contains('.') && !text.contains(',')) {
-        return 500.0; 
+        return 450.0;
       } else {
         List<String> parts = text.split(RegExp(r'[\.,]'));
         if (parts.length > 1) {
           int decimals = parts[1].length;
-          if (decimals == 1) return 50.0; 
-          if (decimals >= 2) return 5.0;  
+          if (decimals == 1) return 45.0; 
+          if (decimals >= 2) return 4.5;  
         }
       }
     } else if (b.unit == 'm') {
-      return 5.0; 
+      return 4.5; 
     }
     return 5.0; 
   }
 
   double _getEffectiveMaxRadius(Beacon b) {
-    double r = _getRadiusInMeters(b);
-    if (r <= 0) return 0;
-    return r + _getMaxError(b);
+    double rMid = _getEffectiveMidRadius(b);
+    if (rMid <= 0) return 0;
+    return rMid + _getMaxError(b);
   }
 
   double _getEffectiveMidRadius(Beacon b) {
     double r = _getRadiusInMeters(b);
     if (r <= 0) return 0;
-    
+
     String text = b.controller.text.trim();
     if (b.unit == 'km') {
       if (!text.contains('.') && !text.contains(',')) {
-        return r + 490.0;
+        return r - 50.0;
       } else {
         List<String> parts = text.split(RegExp(r'[\.,]'));
         if (parts.length > 1) {
           int decimals = parts[1].length;
-          if (decimals == 1) return r + 45.0; 
-          if (decimals >= 2) return r + 4.5;  
+          if (decimals == 1) return r - 5.0; 
+          if (decimals >= 2) return r - 0.5; 
         }
       }
     } else if (b.unit == 'm') {
-      return r; 
+      return r - 0.5; 
     }
     return r;
   }
@@ -3876,4 +3875,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} /// công thức
