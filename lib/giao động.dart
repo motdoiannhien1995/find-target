@@ -736,29 +736,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
-  // --- CẬP NHẬT: TỐI ƯU HÓA HÀM CHỜ GPS ĐỂ KHÔNG BỊ KẸT KHI NHẢY GẦN ---
   Future<void> _waitForSystemLocation(LatLng target) async {
-    // Tính toán xem khoảng cách chuẩn bị di chuyển là bao nhiêu mét
-    double jumpDistance = myRealLocation != null 
-        ? _calculateExactDistance(myRealLocation!, target) 
-        : 1000.0;
-        
     bool matched = false;
     int attempts = 0;
     
-    // Nếu khoảng cách nhảy rất ngắn (< 50 mét), Android sẽ bị kích hoạt bộ lọc nhiễu GPS (Drift Filter)
-    // Tức là nó sẽ không cập nhật ngay lập tức. Ta nới lỏng dung sai và giảm số vòng lặp chờ để app vọt lẹ.
-    int maxAttempts = jumpDistance < 50.0 ? 10 : 25; 
-    double tolerance = jumpDistance < 50.0 ? 5.0 : 2.0; 
-
-    while (!matched && attempts < maxAttempts) {
+    while (!matched && attempts < 25) {
       try {
         Position p = await Geolocator.getCurrentPosition(
             desiredAccuracy: LocationAccuracy.high, 
-            timeLimit: const Duration(milliseconds: 100)); // Rút ngắn timeLimit cho lặp nhanh
+            timeLimit: const Duration(milliseconds: 150));
             
-        // Áp dụng dung sai thông minh dựa vào cự ly nhảy
-        if (_calculateExactDistance(target, LatLng(p.latitude, p.longitude)) <= tolerance) {
+        if (_calculateExactDistance(target, LatLng(p.latitude, p.longitude)) <= 30.0) {
            matched = true;
            if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude));
            break;
@@ -767,20 +755,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       }
       
       if (!matched && myRealLocation != null) {
-        if (_calculateExactDistance(target, myRealLocation!) <= tolerance) {
+        if (_calculateExactDistance(target, myRealLocation!) <= 30.0) {
            matched = true;
            break;
         }
       }
       
       if (!matched) {
-        await Future.delayed(const Duration(milliseconds: 50)); 
+        await Future.delayed(const Duration(milliseconds: 50));
         attempts++;
       }
     }
     
-    // Giảm trễ cứng từ 600ms xuống 150ms. Đủ nhanh để không lag, đủ lâu để hệ thống Broadcast.
-    await Future.delayed(const Duration(milliseconds: 150)); 
+    await Future.delayed(const Duration(milliseconds: 200));
   }
 
   Future<void> _handleOverlayDistance(String val) async {
@@ -836,7 +823,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         double d2 = _calculateExactDistance(currentPos, intersections[1]);
                         LatLng chosen = (d1 < d2) ? intersections[0] : intersections[1];
                         newPos = _optimizePoint(chosen, otherBeacons);
-                        newPos = _snapToAccurateBeacon(newPos, otherBeacons); 
                     }
                 } else if (otherBeacons.length == 1) {
                     var ref = otherBeacons[0];
@@ -1368,6 +1354,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return inputVal * unitToMeter[b.unit]!;
   }
 
+  // Lấy sai số làm tròn tối đa để tính toán trọng số và biên độ giao nhau
   double _getMaxError(Beacon b) {
     double r = _getRadiusInMeters(b);
     if (r <= 0) return 0;
@@ -1375,47 +1362,31 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     String text = b.controller.text.trim();
     if (b.unit == 'km') {
       if (!text.contains('.') && !text.contains(',')) {
-        return 500.0; 
+        return 500.0; // VD: Nhập 5km -> Sai số +- 0.5km (500m)
       } else {
         List<String> parts = text.split(RegExp(r'[\.,]'));
         if (parts.length > 1) {
           int decimals = parts[1].length;
-          if (decimals == 1) return 50.0; 
-          if (decimals >= 2) return 5.0;  
+          if (decimals == 1) return 50.0; // VD: Nhập 5.3km -> Sai số +- 0.05km (50m)
+          if (decimals >= 2) return 5.0;  // VD: Nhập 5.32km -> Sai số +- 0.005km (5m)
         }
       }
     } else if (b.unit == 'm') {
-      return 5.0; 
+      return 5.0; // VD: Nhập 530m -> Sai số +- 5m
     }
-    return 5.0; 
+    return 5.0; // Mặc định
   }
 
+  // --- BÁN KÍNH MAX: Dùng để tính toán đảm bảo các vòng tròn luôn cắt nhau ---
   double _getEffectiveMaxRadius(Beacon b) {
     double r = _getRadiusInMeters(b);
     if (r <= 0) return 0;
     return r + _getMaxError(b);
   }
 
+  // --- BÁN KÍNH LÝ TƯỞNG: Chính là con số bạn nhập vào (Tâm của việc làm tròn số) ---
   double _getEffectiveMidRadius(Beacon b) {
-    double r = _getRadiusInMeters(b);
-    if (r <= 0) return 0;
-    
-    String text = b.controller.text.trim();
-    if (b.unit == 'km') {
-      if (!text.contains('.') && !text.contains(',')) {
-        return r + 490.0;
-      } else {
-        List<String> parts = text.split(RegExp(r'[\.,]'));
-        if (parts.length > 1) {
-          int decimals = parts[1].length;
-          if (decimals == 1) return r + 45.0; 
-          if (decimals >= 2) return r + 4.5;  
-        }
-      }
-    } else if (b.unit == 'm') {
-      return r; 
-    }
-    return r;
+    return _getRadiusInMeters(b);
   }
 
   void _zoomToFitAll() {
@@ -1901,26 +1872,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return [k1, k2];
   }
 
-  LatLng _snapToAccurateBeacon(LatLng pt, List<Beacon> beacons) {
-    Beacon? bestB;
-    double minR = double.infinity;
-    
-    for (var b in beacons) {
-      double r = _getRadiusInMeters(b);
-      if (r >= 0 && r < minR) {
-        minR = r;
-        bestB = b;
-      }
-    }
-    
-    if (bestB != null && bestB.location != null) {
-      if (minR == 0) return bestB.location!;
-      double bearing = _calculateBearing(bestB.location!, pt);
-      return _calculatePointFromBearing(bestB.location!, minR, bearing);
-    }
-    return pt;
-  }
-
   LatLng? _internalCalculateBestFit() {
       var validBeacons = beacons.where((b) => b.location != null && b.controller.text.isNotEmpty).toList();
       if (validBeacons.length < 2) return null;
@@ -1933,20 +1884,19 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
       for (int i = 0; i < validBeacons.length; i++) {
         for (int j = i + 1; j < validBeacons.length; j++) {
+          // Giao điểm của vòng tròn Lý tưởng (Mid)
           double r1Mid = _getEffectiveMidRadius(validBeacons[i]);
           double r2Mid = _getEffectiveMidRadius(validBeacons[j]);
-          var midInter = _calculateTwoCircleIntersectionPrecise(
+          candidates.addAll(_calculateTwoCircleIntersectionPrecise(
               validBeacons[i].location!, r1Mid, 
-              validBeacons[j].location!, r2Mid);
-          candidates.addAll(midInter);
+              validBeacons[j].location!, r2Mid));
               
-          if (midInter.isEmpty || midInter.length == 1) {
-              double r1Max = _getEffectiveMaxRadius(validBeacons[i]);
-              double r2Max = _getEffectiveMaxRadius(validBeacons[j]);
-              candidates.addAll(_calculateTwoCircleIntersectionPrecise(
-                  validBeacons[i].location!, r1Max, 
-                  validBeacons[j].location!, r2Max));
-          }
+          // Giao điểm của vòng tròn Tối đa (Max) phòng trường hợp Mid bị hụt
+          double r1Max = _getEffectiveMaxRadius(validBeacons[i]);
+          double r2Max = _getEffectiveMaxRadius(validBeacons[j]);
+          candidates.addAll(_calculateTwoCircleIntersectionPrecise(
+              validBeacons[i].location!, r1Max, 
+              validBeacons[j].location!, r2Max));
         }
       }
       
@@ -1965,18 +1915,17 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         }
       }
       
-      LatLng optimizedPoint = _optimizePoint(bestPoint, validBeacons);
-      return _snapToAccurateBeacon(optimizedPoint, validBeacons);
+      return _optimizePoint(bestPoint, validBeacons);
   }
 
   LatLng _optimizePoint(LatLng startPoint, List<Beacon> beacons) {
     double lat = startPoint.latitude;
     double lng = startPoint.longitude;
 
-    double step = 0.0001; 
-    double minStep = 1e-10; 
+    double step = 0.0005; 
+    double minStep = 1e-9; 
 
-    for (int i = 0; i < 1000; i++) { 
+    for (int i = 0; i < 400; i++) {
       double currentError = _calculateTotalError(LatLng(lat, lng), beacons);
       
       double dLat = 1e-6; 
@@ -2013,30 +1962,29 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     return LatLng(lat, lng);
   }
 
+  // --- TRỌNG SỐ TIN CẬY (Weighted Least Squares) ---
+  // Thuật toán sẽ ưu tiên bám chặt vào vòng tròn của mốc có độ chính xác cao (m)
+  // và cho phép mốc có sai số lớn (km) co giãn theo mốc m.
   double _calculateTotalError(LatLng p, List<Beacon> beacons) {
     double error = 0;
     for (var b in beacons) {
       if (b.location == null) continue;
       
-      double rMid = _getEffectiveMidRadius(b);
+      double rMid = _getEffectiveMidRadius(b); // Khoảng cách nhập vào là lý tưởng nhất
       if (rMid <= 0) continue;
 
       double d = _calculateExactDistance(p, b.location!);
       double diff = (d - rMid).abs();
       
-      double maxErr = _getMaxError(b);
-      double variance = maxErr * maxErr;
-      if (variance < 1.0) variance = 1.0; 
+      double maxErr = _getMaxError(b); // Sai số tối đa của mốc này
+      double variance = maxErr * maxErr; // Bình phương sai số
+      if (variance < 1.0) variance = 1.0; // Tránh chia cho 0
       
-      double circleSpread = (rMid <= 0) ? 1.0 : rMid; 
-      
-      double weight = 10000.0 / (variance * circleSpread);
-
-      if (rMid <= 30.0) {
-         weight *= 50.0; 
-      } else if (rMid <= 100.0) {
-         weight *= 10.0;
-      }
+      // Trọng số tỷ lệ nghịch với bình phương sai số:
+      // - Nhập 'm' (sai số 5m) -> weight = 1/25 = 0.04
+      // - Nhập 'km' 1 số lẻ (sai số 50m) -> weight = 1/2500 = 0.0004
+      // => Điểm 'm' có lực "hút" kết quả mạnh gấp 100 lần điểm 'km'!
+      double weight = 1.0 / variance; 
 
       error += weight * (diff * diff);
     }
@@ -2189,8 +2137,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       double r1Mid = _getEffectiveMidRadius(b1);
       double r2Mid = _getEffectiveMidRadius(b2);
 
+      // Thử giao nhau theo vòng lý tưởng trước
       List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1Mid, b2.location!, r2Mid);
 
+      // Nếu hụt (0 điểm) hoặc chỉ cắt 1 điểm (tiếp xúc ngoài), dùng bán kính Max để đảm bảo có đủ 2 giao điểm
       if (intersections.isEmpty || intersections.length == 1) {
           double r1Max = _getEffectiveMaxRadius(b1);
           double r2Max = _getEffectiveMaxRadius(b2);
@@ -2214,18 +2164,16 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
              chosen = (d1 < d2) ? intersections[0] : intersections[1]; 
           }
           newPos = _optimizePoint(chosen, otherBeacons);
-          newPos = _snapToAccurateBeacon(newPos, otherBeacons);
         } else {
           newPos = _optimizePoint(intersections[0], otherBeacons);
-          newPos = _snapToAccurateBeacon(newPos, otherBeacons);
         }
       }
     } else if (otherBeacons.length == 1) {
       var ref = otherBeacons[0];
-      double r = _getRadiusInMeters(ref);
+      double r = _getEffectiveMidRadius(ref);
       if (beacons[targetIndex].location != null) {
         double currentBearing = _calculateBearing(ref.location!, beacons[targetIndex].location!);
-        double newBearing = (r <= 30.0) ? currentBearing : (currentBearing + 60.0) % 360.0;
+        double newBearing = (currentBearing + 80.0) % 360.0;
         newPos = _calculatePointFromBearing(ref.location!, r, newBearing);
       } else {
         newPos = _calculatePointFromBearing(ref.location!, r, 0);
@@ -2251,7 +2199,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          } else if (otherBeacons.length == 2) {
             _showMsg("Đã đảo vị trí K1/K2 thành công!");
          } else {
-            _showMsg("Đã tạo lại hướng quét!");
+            _showMsg("Đã xoay điểm thêm 80 độ!");
          }
       } else {
          _showMsg("Đã cập nhật lại vị trí ${_getBeaconName(targetIndex)}!");
@@ -3196,12 +3144,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       if (b1.location != null && b1.controller.text.isNotEmpty &&
           b2.location != null && b2.controller.text.isNotEmpty) {
           try {
-            double r1 = _getRadiusInMeters(b1);
-            double r2 = _getRadiusInMeters(b2);
+            double r1 = _getEffectiveMaxRadius(b1);
+            double r2 = _getEffectiveMaxRadius(b2);
             List<LatLng> intersections = _calculateTwoCircleIntersectionPrecise(b1.location!, r1, b2.location!, r2);
             if (intersections.isNotEmpty) {
               finalPos = _optimizePoint(intersections[0], [b1, b2]);
-              finalPos = _snapToAccurateBeacon(finalPos, [b1, b2]);
               autoPlaced = true;
             }
           } catch (e) {}
@@ -3215,7 +3162,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
          if (prevBeacon.location != null && prevBeacon.controller.text.isNotEmpty) {
                  double? r = double.tryParse(prevBeacon.controller.text.replaceAll(',', '.'));
                  if (r != null && r >= 0) {
-                      double distMeters = _getRadiusInMeters(prevBeacon);
+                      double distMeters = _getEffectiveMidRadius(prevBeacon);
                       LatLng center = prevBeacon.location!;
                       double bearing = _calculateOptimalBearing(center, newIndex);
                       finalPos = _calculatePointFromBearing(center, distMeters, bearing);
@@ -3240,6 +3187,68 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       });
     }
     _requestFocus(beacons.length - 1); 
+  }
+
+  LatLng? get _currentMeasureCenter {
+    if (selectedIndex != null && selectedIndex! < beacons.length && beacons[selectedIndex!].location != null) {
+      return beacons[selectedIndex!].location;
+    }
+    if (targetPoints.isNotEmpty) {
+      return targetPoints[0];
+    }
+    return null;
+  }
+
+  List<Polyline> _buildMeasurementLines() {
+    List<Polyline> lines = [];
+    LatLng? center = _currentMeasureCenter;
+    if (center == null) return lines;
+    
+    for (int i = 0; i < beacons.length; i++) {
+      if (beacons[i].location == null || beacons[i].location == center || beacons[i].controller.text.isEmpty) continue;
+      
+      lines.add(Polyline(
+        points: [beacons[i].location!, center],
+        color: beacons[i].color.withOpacity(0.6),
+        strokeWidth: 2.5,
+      ));
+    }
+    return lines;
+  }
+
+  List<Marker> _buildMeasurementMarkers() {
+    List<Marker> labels = [];
+    LatLng? center = _currentMeasureCenter;
+    if (center == null) return labels;
+    
+    for (int i = 0; i < beacons.length; i++) {
+      if (beacons[i].location == null || beacons[i].location == center || beacons[i].controller.text.isEmpty) continue;
+      
+      double d = _calculateExactDistance(beacons[i].location!, center);
+      LatLng mid = LatLng(
+        (beacons[i].location!.latitude + center.latitude) / 2, 
+        (beacons[i].location!.longitude + center.longitude) / 2
+      );
+      
+      labels.add(Marker(
+        point: mid,
+        width: 70, height: 22,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: beacons[i].color, width: 1.5),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)]
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            d >= 1000 ? "${(d/1000).toStringAsFixed(2)} km" : "${d.toStringAsFixed(1)} m",
+            style: TextStyle(color: beacons[i].color, fontSize: 10, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ));
+    }
+    return labels;
   }
 
   @override
@@ -3755,9 +3764,12 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                   borderColor: b.color,
                                   borderStrokeWidth: 1.5,
                                   useRadiusInMeter: true,
-                                  radius: _getRadiusInMeters(b),
+                                  radius: _getEffectiveMidRadius(b),
                                 )
                           ],
+                        ),
+                        PolylineLayer(
+                          polylines: _buildMeasurementLines(),
                         ),
                         MarkerLayer(
                           markers: [
@@ -3770,6 +3782,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                               Marker(point: targetPoints[i], width: 60, height: 60, child: const Icon(Icons.location_searching, color: Colors.green, size: 35)),
                             for (int i = 0; i < savedTargets.length; i++)
                               Marker(point: savedTargets[i].location, width: 70, height: 60, child: GestureDetector(onTap: () => _showTargetOptions(i), child: const Icon(Icons.bookmark, color: Colors.blue, size: 20))),
+                            ..._buildMeasurementMarkers(),
                           ],
                         ),
                       ],
@@ -3819,4 +3832,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} ////oki
+}
