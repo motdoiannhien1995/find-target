@@ -260,6 +260,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     _saveHistoryFromOverlay();
   }
 
+  // Ẩn hoàn toàn nút nổi (đóng hẳn overlay) khi nhấn giữ nút thu nhỏ
+  Future<void> _closeOverlayCompletely() async {
+    _distFocus.unfocus();
+    _saveHistoryFromOverlay();
+    try {
+      FlutterOverlayWindow.shareData('force_close_overlay');
+      await FlutterOverlayWindow.closeOverlay();
+    } catch (e) {}
+  }
+
   Future<void> _loadTargetFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -557,7 +567,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                               double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
                                               await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
                                             },
-                                            onLongPress: _hideOverlayTemporarily,
+                                            // Nhấn giữ nút thu nhỏ sẽ ẩn hoàn toàn (đóng hẳn overlay)
+                                            onLongPress: _closeOverlayCompletely,
                                             child: Center(
                                               child: Padding(
                                                 padding: const EdgeInsets.all(0.0),
