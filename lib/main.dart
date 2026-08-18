@@ -59,6 +59,12 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   bool _isLockPositionMode = false; 
   bool _isShrunkFixed = false; 
 
+  // Các biến cấu hình ẩn/hiện từng nút
+  bool _hideMainAppBtn = false;
+  bool _hideTargetAppBtn = false;
+  bool _hideSecondAppBtn = false;
+  bool _showResetBtn = false; // Trạng thái hiển thị nút reset
+
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
 
@@ -87,12 +93,19 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
       if (event == 'update_packages') {
         await _loadTargetFromDisk();
-        // Tự động nhảy về ghim nếu đang thu nhỏ mà cập nhật cài đặt cố định
         if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
             double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
             await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+        }
+      } else if (event == 'update_reset_btn') {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        if (mounted) {
+          setState(() {
+            _showResetBtn = prefs.getBool('show_reset_btn') ?? false;
+          });
         }
       } else if (event == 'to_target') {
         setState(() {
@@ -260,7 +273,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     _saveHistoryFromOverlay();
   }
 
-  // Ẩn hoàn toàn nút nổi (đóng hẳn overlay) khi nhấn giữ nút thu nhỏ
   Future<void> _closeOverlayCompletely() async {
     _distFocus.unfocus();
     _saveHistoryFromOverlay();
@@ -279,6 +291,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _secondTargetPackage = prefs.getString('second_target_app_package');
         _isReturning = prefs.getBool('overlay_is_returning') ?? false;
         _isShrunkFixed = prefs.getBool('shrunk_is_fixed') ?? false;
+        _hideMainAppBtn = prefs.getBool('hide_main_app_btn') ?? false;
+        _hideTargetAppBtn = prefs.getBool('hide_target_app_btn') ?? false;
+        _hideSecondAppBtn = prefs.getBool('hide_second_app_btn') ?? false;
+        _showResetBtn = prefs.getBool('show_reset_btn') ?? false;
         if (_isReturning) {
           _bgColor = Colors.green.shade800;
         } else {
@@ -309,18 +325,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     }
   }
 
-  Widget _buildMainAppButton() {
+  Widget _buildResetButton() {
     return InkWell(
       onTap: () async {
-        _distFocus.unfocus();
-        setState(() {
-          _bgColor = Colors.blue.shade800;
-        });
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('overlay_is_returning', false);
-        await _launchApp(_myPackage);
-      },
-      onDoubleTap: () async {
         _distFocus.unfocus();
         setState(() {
           _bgColor = Colors.orange.shade800;
@@ -333,15 +340,39 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             setState(() {
-              _bgColor = Colors.blue.shade800;
+              if (_isReturning) {
+                _bgColor = Colors.green.shade800;
+              } else {
+                _bgColor = Colors.blue.shade800;
+              }
             });
           }
         });
       },
+      onLongPress: _shrinkAndHide,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
+        child: Icon(Icons.change_circle, color: Colors.orange.shade400.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
+      ),
+    );
+  }
+
+  Widget _buildMainAppButton() {
+    return InkWell(
+      onTap: () async {
+        _distFocus.unfocus();
+        setState(() {
+          _bgColor = Colors.blue.shade800;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('overlay_is_returning', false);
+        await _launchApp(_myPackage);
+      },
       onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -364,7 +395,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -385,7 +416,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.rocket_launch, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -393,8 +424,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    bool hasTarget = (_targetPackage != null && _targetPackage!.isNotEmpty);
-    bool hasSecondTarget = (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty);
+    bool hasTarget = (_targetPackage != null && _targetPackage!.isNotEmpty && !_hideTargetAppBtn);
+    bool hasSecondTarget = (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty && !_hideSecondAppBtn);
+    bool showMainBtn = !_hideMainAppBtn;
 
     return Material(
       color: Colors.transparent,
@@ -415,7 +447,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         },
         onPointerUp: (_) async {
-          // Xử lý giật nút về vị trí cố định khi nhả tay (dành cho lúc cố tình kéo nút thu nhỏ)
           if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
@@ -452,9 +483,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                             try {
                               await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
                               _distFocus.requestFocus();
-                              Future.delayed(const Duration(milliseconds: 100), () {
-                                SystemChannels.textInput.invokeMethod('TextInput.show');
-                              });
+                              await Future.delayed(const Duration(milliseconds: 50));
+                              SystemChannels.textInput.invokeMethod('TextInput.show');
                             } catch (e) {}
                           },
                           onLongPress: _shrinkAndHide,
@@ -548,7 +578,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                   },
                                   borderRadius: BorderRadius.circular(20),
                                   child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0), 
+                                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0), 
                                     child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 26),
                                   ),
                                 )
@@ -567,7 +597,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                               double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
                                               await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
                                             },
-                                            // Nhấn giữ nút thu nhỏ sẽ ẩn hoàn toàn (đóng hẳn overlay)
                                             onLongPress: _closeOverlayCompletely,
                                             child: Center(
                                               child: Padding(
@@ -583,13 +612,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                         : const SizedBox.shrink(),
                                   ]
                                 : [
-                                    _buildMainAppButton(),
-                                    if (hasTarget) ...[
+                                    if (_showResetBtn) ...[
+                                      _buildResetButton(),
                                       Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                    ],
+                                    if (showMainBtn) _buildMainAppButton(),
+                                    if (showMainBtn && (hasTarget || hasSecondTarget))
+                                      Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                    if (hasTarget) ...[
+                                      if (showMainBtn) const SizedBox(height: 4),
                                       _buildTargetAppButton(),
                                     ],
                                     if (hasSecondTarget) ...[
-                                      Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                      if (showMainBtn || hasTarget) ...[
+                                        Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                        const SizedBox(height: 4),
+                                      ],
                                       _buildSecondTargetAppButton(),
                                     ],
                                   ]),
@@ -731,6 +769,21 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   int? _lastFocusedIndex;
 
+  // HÀM ĐỒNG BỘ NÚT RESET
+  // Chỉ báo bật nút màu cam khi ứng dụng đang chạy Mốc 3 (selectedIndex == 2)
+  Future<void> _syncOverlayState() async {
+    bool shouldShow = (selectedIndex == 2);
+    final prefs = await SharedPreferences.getInstance();
+    bool current = prefs.getBool('show_reset_btn') ?? false;
+    if (current != shouldShow) {
+      await prefs.setBool('show_reset_btn', shouldShow);
+      try {
+        bool isActive = await FlutterOverlayWindow.isActive();
+        if (isActive) FlutterOverlayWindow.shareData('update_reset_btn');
+      } catch(e) {}
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -777,7 +830,10 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      SharedPreferences.getInstance().then((prefs) => prefs.remove('current_playing_target'));
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.remove('current_playing_target');
+      });
+      _syncOverlayState(); 
       await _initLocation();
       
       _serviceStatusStreamSubscription = Geolocator.getServiceStatusStream().listen((ServiceStatus status) {
@@ -963,6 +1019,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                 _showMsg("Đã đổi mốc sang ${beacons[distanceIndex].unit}!");
             }
         }
+        _syncOverlayState();
         return;
     }
 
@@ -991,6 +1048,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _mapController.move(pos, 16);
       await _setMock(pos.latitude, pos.longitude);
       _showMsg("Đã dán tọa độ và chạy Mốc 1!");
+      _syncOverlayState();
       _requestFocus(0); 
       await _switchToTargetApp();
       return;
@@ -1849,8 +1907,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 210, 
-      width: 95,
+      height: 300, 
+      width: 95,   
       startPosition: OverlayPosition(startX, startY),
     );
     setState(() => _isOverlayActive = true);
@@ -1913,9 +1971,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _showMsg("Đã HỦY thay đổi vị trí.");
   }
 
+  // Hộp thoại cài đặt tùy chọn ẩn từng nút riêng lẻ
   void _showOverlaySettingsDialog() async {
     final prefs = await SharedPreferences.getInstance();
     bool isShrunkFixed = prefs.getBool('shrunk_is_fixed') ?? false;
+    bool hideMainAppBtn = prefs.getBool('hide_main_app_btn') ?? false;
+    bool hideTargetAppBtn = prefs.getBool('hide_target_app_btn') ?? false;
+    bool hideSecondAppBtn = prefs.getBool('hide_second_app_btn') ?? false;
 
     if (!mounted) return;
     showDialog(
@@ -1924,22 +1986,61 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         builder: (context, setDialogState) {
           return AlertDialog(
             title: const Text("Cài đặt Nút Nổi", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text("Cố định nút thu nhỏ", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                  subtitle: const Text("Nút thu nhỏ sẽ luôn bám theo vị trí bạn đã ghim.", style: TextStyle(fontSize: 12)),
-                  value: isShrunkFixed,
-                  activeColor: Colors.blue,
-                  onChanged: (val) async {
-                    setDialogState(() => isShrunkFixed = val);
-                    await prefs.setBool('shrunk_is_fixed', val);
-                    FlutterOverlayWindow.shareData('update_packages'); 
-                  },
-                ),
-              ],
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Cố định nút thu nhỏ", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Nút thu nhỏ sẽ luôn bám theo vị trí bạn đã ghim.", style: TextStyle(fontSize: 12)),
+                    value: isShrunkFixed,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => isShrunkFixed = val);
+                      await prefs.setBool('shrunk_is_fixed', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Ẩn nút App chính", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Ẩn nút mở app chính (màu xanh dương).", style: TextStyle(fontSize: 12)),
+                    value: hideMainAppBtn,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => hideMainAppBtn = val);
+                      await prefs.setBool('hide_main_app_btn', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Ẩn nút App liên kết", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Ẩn nút mở app liên kết (màu xanh lá).", style: TextStyle(fontSize: 12)),
+                    value: hideTargetAppBtn,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => hideTargetAppBtn = val);
+                      await prefs.setBool('hide_target_app_btn', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Ẩn nút App phụ", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Ẩn nút mở app phụ (màu cam/tên lửa).", style: TextStyle(fontSize: 12)),
+                    value: hideSecondAppBtn,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => hideSecondAppBtn = val);
+                      await prefs.setBool('hide_second_app_btn', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ĐÓNG"))
@@ -1951,6 +2052,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
   }
 
   Future<void> _setMock(double lat, double lng, {bool fromTarget = false}) async {
+    _syncOverlayState(); 
     if (_isActionBlocked()) {
       _showPaymentDialog(); 
       return; 
@@ -2022,6 +2124,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       SharedPreferences.getInstance().then((prefs) => prefs.remove('current_playing_target'));
       _showMsg("Đã dừng Mock");
     } catch (e) { print(e); }
+    _syncOverlayState(); 
   }
 
   double _toRadians(double degree) => degree * pi / 180.0;
@@ -2288,6 +2391,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
     _requestFocus(targetIndex); 
     await _setMock(location.latitude, location.longitude);
+    _syncOverlayState();
     _showMsg("Đang chạy ${_getBeaconName(targetIndex)}");
   }
 
@@ -2364,6 +2468,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       });
       _mapController.move(finalPos, 16);
       await _setMock(finalPos.latitude, finalPos.longitude);
+      _syncOverlayState();
     } catch (e) { _showMsg("Lỗi"); }
   }
 
@@ -2457,6 +2562,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _mapController.move(newPos, _mapController.camera.zoom);
       await _setMock(newPos.latitude, newPos.longitude);
       _zoomToFitAll();
+      _syncOverlayState();
       
       if (!isFixingNext) {
          if (otherBeacons.length >= 3) {
@@ -2549,6 +2655,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _mapController.move(newStart, 16);
     await _setMock(newStart.latitude, newStart.longitude);
     _showMsg("Đã gán và chạy Mốc 1 mới!");
+    _syncOverlayState();
 
     if (distToKeep.isNotEmpty) {
         await _addNewBeacon();
@@ -3139,6 +3246,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     });
     _showMsg(deletePrevious ? "Đã xóa từ ${_getBeaconName(index)} trở về trước" : "Đã xóa ${_getBeaconName(index)}");
     _zoomToFitAll(); 
+    _syncOverlayState(); 
   }
 
   void _showTargetOptions(int index, {bool isHistory = false}) {
@@ -3391,6 +3499,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           _zoomToFitAll();
           _requestFocus(beacons.length - 1); 
           await _switchToTargetApp();
+          _syncOverlayState(); 
           return; 
       }
     }
@@ -3453,6 +3562,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       });
     }
     _requestFocus(beacons.length - 1); 
+    _syncOverlayState(); 
   }
 
   @override
