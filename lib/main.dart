@@ -100,6 +100,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         });
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+          if (!_isLockPositionMode) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.reload();
+            double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+            double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+            await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+          }
         } catch (e) {}
       } else if (event == 'show') {
         setState(() {
@@ -108,6 +115,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         });
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+          if (!_isLockPositionMode) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.reload();
+            double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+            double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+            await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+          }
         } catch (e) {}
         await _loadTargetFromDisk(); 
       } else if (event == 'start_position_mode') {
@@ -202,6 +216,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       });
       try {
         await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        if (!_isLockPositionMode) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.reload();
+          double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+          double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+          await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+        }
       } catch (e) {}
     }
   }
@@ -296,9 +317,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   }
 
   Widget _buildTargetAppButton() {
-    bool isDisabled = (_targetPackage == null || _targetPackage!.isEmpty);
+    if (_targetPackage == null || _targetPackage!.isEmpty) {
+      return const SizedBox.shrink(); 
+    }
     return InkWell(
-      onTap: isDisabled ? null : () async {
+      onTap: () async {
         _distFocus.unfocus();
         setState(() {
           _bgColor = Colors.green.shade800;
@@ -311,15 +334,17 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
-        child: Icon(Icons.layers, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 26),
+        child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
 
   Widget _buildSecondTargetAppButton() {
-    bool isDisabled = (_secondTargetPackage == null || _secondTargetPackage!.isEmpty);
+    if (_secondTargetPackage == null || _secondTargetPackage!.isEmpty) {
+      return const SizedBox.shrink(); 
+    }
     return InkWell(
-      onTap: isDisabled ? null : () async {
+      onTap: () async {
         _distFocus.unfocus();
         setState(() {
           _bgColor = Colors.deepOrange;
@@ -330,13 +355,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
-        child: Icon(Icons.rocket_launch, color: isDisabled ? Colors.white30 : Colors.white.withOpacity(_opacity), size: 26),
+        child: Icon(Icons.rocket_launch, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    bool hasTarget = (_targetPackage != null && _targetPackage!.isNotEmpty);
+    bool hasSecondTarget = (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty);
+
     return Material(
       color: Colors.transparent,
       child: Listener(
@@ -504,10 +532,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 ]
                               : [
                                   _buildMainAppButton(),
-                                  Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
-                                  _buildTargetAppButton(),
-                                  Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
-                                  _buildSecondTargetAppButton(),
+                                  if (hasTarget) ...[
+                                    Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                    _buildTargetAppButton(),
+                                  ],
+                                  if (hasSecondTarget) ...[
+                                    Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                    _buildSecondTargetAppButton(),
+                                  ],
                                 ]),
                     ),
                   ],
@@ -1792,9 +1824,9 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       try {
         OverlayPosition? pos = await FlutterOverlayWindow.getOverlayPosition();
         if (pos != null) {
-          // Giới hạn an toàn (clamp) để nút không bao giờ bị chui tụt lấp lửng ra ngoài màn hình
-          double safeX = pos.x.clamp(0.0, 300.0); 
-          double safeY = pos.y.clamp(-350.0, 500.0);
+          // Giới hạn tuyệt đối (clamp) ngăn không cho kéo lấp lửng ra ngoài màn hình
+          double safeX = pos.x.clamp(0.0, 100.0); 
+          double safeY = pos.y.clamp(-300.0, 350.0);
 
           await prefs.setDouble('custom_fixed_x', safeX);
           await prefs.setDouble('custom_fixed_y', safeY);
@@ -3598,7 +3630,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Nút Ghim nhỏ gọn
                             SizedBox(
                               width: 32,
                               height: 32,
@@ -3616,7 +3647,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             ),
                             const SizedBox(width: 4),
 
-                            // Nút Hủy nhỏ gọn (chỉ hiện khi đang chỉnh vị trí)
                             if (_isEditingOverlayPosition) ...[
                               SizedBox(
                                 width: 32,
@@ -3991,4 +4021,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} /////////////////
