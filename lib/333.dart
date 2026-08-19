@@ -93,7 +93,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
       if (event == 'update_packages') {
         await _loadTargetFromDisk();
-        if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
+        if (_isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
             double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
@@ -352,7 +352,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.change_circle, color: Colors.orange.shade400.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
       ),
     );
@@ -372,7 +372,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -395,7 +395,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -416,7 +416,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10.0),
         child: Icon(Icons.rocket_launch, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
@@ -447,7 +447,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         },
         onPointerUp: (_) async {
-          if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
+          if (_isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
             double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
@@ -483,7 +483,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                             try {
                               await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
                               _distFocus.requestFocus();
-                              await Future.delayed(const Duration(milliseconds: 150));
+                              await Future.delayed(const Duration(milliseconds: 50));
                               SystemChannels.textInput.invokeMethod('TextInput.show');
                             } catch (e) {}
                           },
@@ -565,7 +565,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                           ),
                         ),
                         
+                        const SizedBox(height: 12),
                         Container(width: 55, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
+                        const SizedBox(height: 8), 
                       ],
                       
                       Column(
@@ -612,26 +614,28 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                         : const SizedBox.shrink(),
                                   ]
                                 : [
-                                    if (showMainBtn) _buildMainAppButton(),
-                                    if (showMainBtn && (hasTarget || hasSecondTarget || _showResetBtn))
+                                    if (_showResetBtn) ...[
+                                      _buildResetButton(),
+                                      const SizedBox(height: 4),
                                       Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                      const SizedBox(height: 4),
+                                    ],
+                                    if (showMainBtn) _buildMainAppButton(),
+                                    if (showMainBtn && (hasTarget || hasSecondTarget)) ...[
+                                      const SizedBox(height: 4),
+                                      Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                      const SizedBox(height: 4),
+                                    ],
                                     if (hasTarget) ...[
-                                      if (showMainBtn) const SizedBox(height: 4),
                                       _buildTargetAppButton(),
                                     ],
                                     if (hasSecondTarget) ...[
                                       if (showMainBtn || hasTarget) ...[
+                                        const SizedBox(height: 4),
                                         Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
                                         const SizedBox(height: 4),
                                       ],
                                       _buildSecondTargetAppButton(),
-                                    ],
-                                    if (_showResetBtn) ...[
-                                      if (showMainBtn || hasTarget || hasSecondTarget) ...[
-                                        Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)),
-                                        const SizedBox(height: 4),
-                                      ],
-                                      _buildResetButton(),
                                     ],
                                   ]),
                       ),
@@ -772,8 +776,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   int? _lastFocusedIndex;
 
-  // HÀM ĐỒNG BỘ NÚT RESET
-  // Chỉ báo bật nút màu cam khi ứng dụng đang chạy Mốc 3 (selectedIndex == 2)
   Future<void> _syncOverlayState() async {
     bool shouldShow = (selectedIndex == 2);
     final prefs = await SharedPreferences.getInstance();
@@ -897,44 +899,36 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     }
   }
 
+  // TỐI ƯU SIÊU TỐC CHO CÁC MỐC KHOẢNG CÁCH NGẮN (MÉT)
   Future<void> _waitForSystemLocation(LatLng target) async {
     double jumpDistance = myRealLocation != null 
         ? _calculateExactDistance(myRealLocation!, target) 
         : 1000.0;
         
+    // Nếu khoảng cách nhảy dưới 15 mét, OS xử lý setMockLocation ngay lập tức
+    // Việc chờ Geolocator (vốn bị kẹt bởi distanceFilter 5m) sẽ gây treo mất thời gian.
+    // -> Bỏ qua vòng lặp, chờ cứng 200ms để OS broadcast tọa độ rồi nhảy app luôn cho nhanh.
+    if (jumpDistance < 15.0) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (mounted) setState(() => myRealLocation = target);
+      return; 
+    }
+
     bool matched = false;
     int attempts = 0;
-    
-    int maxAttempts = jumpDistance < 50.0 ? 10 : 25; 
-    double tolerance = jumpDistance < 50.0 ? 5.0 : 2.0; 
+    int maxAttempts = 10; // Tối đa thử 10 lần (~500ms) để không bị kẹt lâu
+    double tolerance = jumpDistance < 50.0 ? 8.0 : 3.0; // Nới lỏng độ chính xác để thoát vòng lặp nhanh
 
     while (!matched && attempts < maxAttempts) {
-      try {
-        Position p = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high, 
-            timeLimit: const Duration(milliseconds: 100)); 
-            
-        if (_calculateExactDistance(target, LatLng(p.latitude, p.longitude)) <= tolerance) {
-           matched = true;
-           if (mounted) setState(() => myRealLocation = LatLng(p.latitude, p.longitude));
-           break;
-        }
-      } catch (e) {
+      if (myRealLocation != null && _calculateExactDistance(target, myRealLocation!) <= tolerance) {
+         matched = true;
+         break;
       }
-      
-      if (!matched && myRealLocation != null) {
-        if (_calculateExactDistance(target, myRealLocation!) <= tolerance) {
-           matched = true;
-           break;
-        }
-      }
-      
-      if (!matched) {
-        await Future.delayed(const Duration(milliseconds: 50)); 
-        attempts++;
-      }
+      await Future.delayed(const Duration(milliseconds: 50));
+      attempts++;
     }
     
+    // Đảm bảo nhịp chót cho app liên kết bắt tọa độ kịp
     await Future.delayed(const Duration(milliseconds: 150)); 
   }
 
@@ -1053,7 +1047,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _showMsg("Đã dán tọa độ và chạy Mốc 1!");
       _syncOverlayState();
       _requestFocus(0); 
-      await _switchToTargetApp(delayMs: 600); // Tăng thời gian chờ riêng cho hành động dán tọa độ
+      await _switchToTargetApp();
       return;
     }
 
@@ -1435,8 +1429,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // Cấu hình linh hoạt thời gian chờ trước khi sang app liên kết
-  Future<void> _switchToTargetApp({int delayMs = 50}) async {
+  Future<void> _switchToTargetApp() async {
     if (targetAppPackage == null || targetAppPackage!.isEmpty) return;
     
     if (_isOverlayActive) {
@@ -1446,7 +1439,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('overlay_is_returning', true);
 
-    await Future.delayed(Duration(milliseconds: delayMs)); 
+    await Future.delayed(const Duration(milliseconds: 50)); 
     
     try {
       final Uri uri1 = Uri.parse("intent:#Intent;action=android.intent.action.MAIN;package=$targetAppPackage;launchFlags=0x10020000;end");
@@ -1911,7 +1904,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 450, 
+      height: 350, 
       width: 95,   
       startPosition: OverlayPosition(startX, startY),
     );
@@ -1940,7 +1933,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         OverlayPosition? pos = await FlutterOverlayWindow.getOverlayPosition();
         if (pos != null) {
           double safeX = pos.x.clamp(0.0, 100.0); 
-          double safeY = pos.y.clamp(-400.0, 400.0);
+          double safeY = pos.y.clamp(-300.0, 350.0);
 
           await prefs.setDouble('custom_fixed_x', safeX);
           await prefs.setDouble('custom_fixed_y', safeY);
@@ -3918,7 +3911,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                                       _mapController.move(pos, 15);
                                       await _assignSavedTargetToP(pos);
                                       _showMsg("Đã dán tọa độ và chuyển sang App!");
-                                      await _switchToTargetApp(delayMs: 600); 
+                                      await _switchToTargetApp(); 
                                     } else {
                                       _showMsg("Nội dung copy không phải là tọa độ hợp lệ!");
                                     }
@@ -4187,36 +4180,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                             for (int i = 0; i < targetPoints.length; i++)
                               Marker(point: targetPoints[i], width: 60, height: 60, child: const Icon(Icons.location_searching, color: Colors.green, size: 35)),
                             for (int i = 0; i < savedTargets.length; i++)
-                              Marker(
-                                point: savedTargets[i].location, 
-                                width: 120, 
-                                height: 65, 
-                                child: GestureDetector(
-                                  onTap: () => _showTargetOptions(i), 
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const Icon(Icons.bookmark, color: Colors.blue, size: 26),
-                                      Container(
-                                        margin: const EdgeInsets.only(top: 2),
-                                        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.85),
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: Colors.blue, width: 0.5),
-                                        ),
-                                        child: Text(
-                                          savedTargets[i].name,
-                                          style: const TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
-                                          textAlign: TextAlign.center,
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                              Marker(point: savedTargets[i].location, width: 70, height: 60, child: GestureDetector(onTap: () => _showTargetOptions(i), child: const Icon(Icons.bookmark, color: Colors.blue, size: 20))),
                           ],
                         ),
                       ],
@@ -4266,4 +4230,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} /////////////////
+} 
