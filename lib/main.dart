@@ -396,18 +396,21 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       child: Listener(
         behavior: HitTestBehavior.translucent, // Thêm thuộc tính này để bắt sự kiện xuyên suốt
         onPointerMove: (_) {
+          // 1. Tự động thu nhỏ nút khi vuốt kéo nếu đang mở
           if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
             setState(() {
               _isShrunk = true;
             });
             _saveHistoryFromOverlay();
-            if (_isShrunkFixed) {
-              SharedPreferences.getInstance().then((prefs) {
-                double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
-                double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
-                FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
-              });
-            }
+          }
+
+          // 2. Chèn Logic mới: Liên tục nhảy về vị trí ghim ngay trong lúc kéo nếu bật ghim hệ thống
+          if (_isShrunkFixed && !_isLockPositionMode) {
+            SharedPreferences.getInstance().then((prefs) {
+              double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+              double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+              FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+            });
           }
         },
         onPointerUp: (_) async {
@@ -4245,4 +4248,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-} // không vuốt di chuyển dưới nhưng vẫn kéo
+}
