@@ -317,6 +317,29 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     );
   }
 
+  Widget _buildPasteButton() {
+    return InkWell(
+      onTap: () async {
+        _distFocus.unfocus();
+        _triggerFlash(Colors.cyan.shade700);
+        
+        // Gửi cờ yêu cầu app chính tự mở lên và đọc clipboard (vượt qua giới hạn chạy ngầm của Android)
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        await prefs.setBool('pending_paste_from_overlay', true);
+        await prefs.setBool('overlay_is_returning', false);
+        
+        await _launchApp(_myPackage);
+      },
+      onLongPress: _shrinkAndHide,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
+        child: Icon(Icons.content_paste_go, color: Colors.cyan.shade400.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 32),
+      ),
+    );
+  }
+
   Widget _buildMainAppButton() {
     return InkWell(
       onTap: () async {
@@ -378,7 +401,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   @override
   Widget build(BuildContext context) {
     if (_isGhostMode) {
-      // Trả về widget kích thước 1x1 trong suốt nhưng vẫn vẽ UI để tránh bị hệ điều hành dọn dẹp (kill app)
       return const Material(
         color: Colors.transparent,
         child: SizedBox(width: 1, height: 1),
@@ -394,9 +416,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return Material(
       color: Colors.transparent,
       child: Listener(
-        behavior: HitTestBehavior.translucent, // Thêm thuộc tính này để bắt sự kiện xuyên suốt
+        behavior: HitTestBehavior.translucent, 
         onPointerMove: (_) {
-          // 1. Tự động thu nhỏ nút khi vuốt kéo nếu đang mở
           if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
             setState(() {
               _isShrunk = true;
@@ -404,7 +425,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             _saveHistoryFromOverlay();
           }
 
-          // 2. Chèn Logic mới: Liên tục nhảy về vị trí ghim ngay trong lúc kéo nếu bật ghim hệ thống
           if (_isShrunkFixed && !_isLockPositionMode) {
             SharedPreferences.getInstance().then((prefs) {
               double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
@@ -421,7 +441,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
           }
         },
-        onPointerCancel: (_) async { // Đảm bảo bắt sự kiện khi Android kết thúc kéo cửa sổ
+        onPointerCancel: (_) async { 
           if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
@@ -430,7 +450,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         },
         child: GestureDetector(
-          behavior: HitTestBehavior.translucent, // Thêm thuộc tính này
+          behavior: HitTestBehavior.translucent,
           child: Align(
             alignment: Alignment.topCenter,
             child: Padding(
@@ -438,8 +458,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Container(
-                  width: _isShrunk ? 24 : 100, // THU NHỎ XUỐNG 24
-                  height: _isShrunk ? 24 : null, // THU NHỎ XUỐNG 24
+                  width: _isShrunk ? 24 : 100, 
+                  height: _isShrunk ? 24 : null,
                   decoration: BoxDecoration(
                     color: _flashBgColor, 
                     shape: BoxShape.rectangle,
@@ -582,7 +602,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                               child: Center(
                                                 child: Padding(
                                                   padding: const EdgeInsets.all(0.0),
-                                                  // THAY ĐỔI ICON LÀM NÓ NHỎ VÀ TRONG SUỐT HƠN KHI BỊ THU NHỎ
                                                   child: Icon(
                                                     Icons.circle, 
                                                     color: Colors.grey.shade800.withOpacity(_opacity == 0.0 ? 0.0 : 0.6), 
@@ -597,11 +616,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                         children: [
-                                          if (_showResetBtn && !_distFocus.hasFocus) _buildResetButton(),
                                           if (showMainBtn) _buildMainAppButton(),
+                                          if (_showResetBtn && !_distFocus.hasFocus)
+                                            _buildResetButton()
+                                          else
+                                            _buildPasteButton(),
                                         ],
                                       ),
-                                      if ((showMainBtn || (_showResetBtn && !_distFocus.hasFocus)) && (hasTarget || hasSecondTarget))
+                                      if (hasTarget || hasSecondTarget)
                                         Padding(
                                           padding: const EdgeInsets.symmetric(vertical: 6.0),
                                           child: Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)),
@@ -1506,6 +1528,22 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
             if (mounted) _handleOverlayDistance(pendingDist);
           });
         }
+
+        // --- MỚI THÊM: Xử lý dán Clipboard khi app vừa từ nút nổi quay về ---
+        bool pendingPaste = prefs.getBool('pending_paste_from_overlay') ?? false;
+        if (pendingPaste) {
+          await prefs.setBool('pending_paste_from_overlay', false);
+          Future.delayed(const Duration(milliseconds: 300), () async {
+            if (mounted) {
+               ClipboardData? cData = await Clipboard.getData(Clipboard.kTextPlain);
+               if (cData != null && cData.text != null && cData.text!.isNotEmpty) {
+                 _handleOverlayDistance(cData.text!);
+               } else {
+                 _showMsg("Bộ nhớ tạm trống hoặc không thể đọc!");
+               }
+            }
+          });
+        }
       });
 
       if (_lastFocusedIndex != null && _lastFocusedIndex! < beacons.length) {
@@ -1893,7 +1931,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 460, // Đã giảm nhẹ chiều cao để bớt dài
+      height: 460, 
       width: 115,   
       startPosition: OverlayPosition(startX, startY),
     );
@@ -2848,7 +2886,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Đám mây (Theo ID thiết bị hiện tại):", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue)),
+            const Text("Đám mây (Theo ID thiết hiện tại):", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue)),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
