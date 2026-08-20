@@ -51,10 +51,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   String? _secondTargetPackage; 
   
   bool _isReturning = false; 
-  Color _flashBgColor = Colors.transparent; 
+  Color _bgColor = Colors.blue.shade800;
   
   double _opacity = 0.85; 
   bool _isShrunk = false; 
+  bool _isTemporarilyHidden = false;
   bool _isLockPositionMode = false; 
   bool _isShrunkFixed = false; 
   bool _isGhostMode = false; 
@@ -86,7 +87,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       if (!mounted) return;
       
       try {
-        if (!_distFocus.hasFocus && !_isShrunk && !_isGhostMode) {
+        if (!_distFocus.hasFocus && !_isTemporarilyHidden && !_isShrunk && !_isGhostMode) {
            await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         }
       } catch (e) {}
@@ -110,11 +111,13 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       } else if (event == 'to_target') {
         setState(() {
           _isReturning = true;
+          _bgColor = Colors.green.shade800;
         });
       } else if (event == 'to_main') {
         setState(() {
           _isGhostMode = false;
           _isReturning = false;
+          _bgColor = Colors.blue.shade800;
           if (!_isLockPositionMode) _isShrunk = false;
           _opacity = 0.85;
         });
@@ -169,20 +172,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.dispose();
   }
 
-  // Hàm hiệu ứng chớp nền tạm thời
-  void _triggerFlash(Color flashColor) {
-    setState(() {
-      _flashBgColor = flashColor.withOpacity(0.6);
-    });
-    Future.delayed(const Duration(milliseconds: 250), () {
-      if (mounted) {
-        setState(() {
-          _flashBgColor = Colors.transparent;
-        });
-      }
-    });
-  }
-
   Future<void> _saveHistoryFromOverlay() async {
      try {
          final prefs = await SharedPreferences.getInstance();
@@ -227,6 +216,47 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
      }
   }
 
+  Future<void> _hideOverlayTemporarily() async {
+    _distFocus.unfocus();
+    setState(() {
+      _isTemporarilyHidden = true;
+      _opacity = 0.0;
+      _isShrunk = true;
+    });
+    
+    try {
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
+      if (_isShrunkFixed && !_isLockPositionMode) {
+        final prefs = await SharedPreferences.getInstance();
+        double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+        double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+        await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+      }
+    } catch (e) {}
+
+    FlutterOverlayWindow.shareData('save_history');
+
+    await Future.delayed(const Duration(seconds: 3));
+
+    if (mounted) {
+      setState(() {
+        _isTemporarilyHidden = false;
+        _opacity = 0.85;
+        if (!_isLockPositionMode) _isShrunk = false;
+      });
+      try {
+        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+        if (!_isLockPositionMode) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.reload();
+          double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+          double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+          await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+        }
+      } catch (e) {}
+    }
+  }
+
   Future<void> _shrinkAndHide() async {
     if (_isLockPositionMode) return; 
     _distFocus.unfocus();
@@ -256,7 +286,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     });
     try {
       await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
-      // GIỮ NGUYÊN TỌA ĐỘ TRÊN MÀN HÌNH - KHÔNG NÉM RA -9999 ĐỂ TRÁNH BỊ HỆ THỐNG KILL APP
+      await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, -9999));
       FlutterOverlayWindow.shareData('ghost_mode_active');
     } catch (e) {}
   }
@@ -274,6 +304,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _hideTargetAppBtn = prefs.getBool('hide_target_app_btn') ?? false;
         _hideSecondAppBtn = prefs.getBool('hide_second_app_btn') ?? false;
         _showResetBtn = prefs.getBool('show_reset_btn') ?? false;
+        if (_isReturning) {
+          _bgColor = Colors.green.shade800;
+        } else {
+          _bgColor = Colors.blue.shade800;
+        }
       });
     } catch (e) {
       print("Overlay lỗi đọc disk");
@@ -294,25 +329,40 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     try {
       bool? success = await InstalledApps.startApp(pkg);
       if (success == true) return; 
-    } catch (e) {}
+    } catch (e) {
+      if (mounted) setState(() => _bgColor = Colors.red.shade800);
+    }
   }
 
   Widget _buildResetButton() {
     return InkWell(
       onTap: () async {
         _distFocus.unfocus();
-        _triggerFlash(Colors.orange.shade700);
+        setState(() {
+          _bgColor = Colors.orange.shade800;
+        });
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         await prefs.setBool('pending_reset', true);
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            setState(() {
+              if (_isReturning) {
+                _bgColor = Colors.green.shade800;
+              } else {
+                _bgColor = Colors.blue.shade800;
+              }
+            });
+          }
+        });
       },
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
-        child: Icon(Icons.change_circle, color: Colors.orange.shade400.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 12.0),
+        child: Icon(Icons.change_circle, color: Colors.orange.shade400.withOpacity(_opacity == 0.0 ? 0.0 : 1.0), size: 26),
       ),
     );
   }
@@ -321,16 +371,18 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return InkWell(
       onTap: () async {
         _distFocus.unfocus();
-        _triggerFlash(Colors.blue.shade700);
+        setState(() {
+          _bgColor = Colors.blue.shade800;
+        });
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _hideOverlayTemporarily,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
-        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 12.0),
+        child: Icon(Icons.my_location, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -342,7 +394,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return InkWell(
       onTap: () async {
         _distFocus.unfocus();
-        _triggerFlash(Colors.green.shade700);
+        setState(() {
+          _bgColor = Colors.green.shade800;
+        });
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
@@ -350,8 +404,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
-        child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 12.0),
+        child: Icon(Icons.layers, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -363,14 +417,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return InkWell(
       onTap: () async {
         _distFocus.unfocus();
-        _triggerFlash(Colors.deepOrange);
+        setState(() {
+          _bgColor = Colors.deepOrange;
+        });
         await _launchApp(_secondTargetPackage!);
       },
       onLongPress: _shrinkAndHide,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
-        child: Icon(Icons.rocket_launch, color: Colors.white.withOpacity(_opacity), size: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 12.0),
+        child: Icon(Icons.rocket_launch, color: Colors.white.withOpacity(_opacity), size: 26),
       ),
     );
   }
@@ -378,17 +434,14 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   @override
   Widget build(BuildContext context) {
     if (_isGhostMode) {
-      // Trả về widget kích thước 1x1 trong suốt nhưng vẫn vẽ UI để tránh bị hệ điều hành dọn dẹp (kill app)
-      return const Material(
-        color: Colors.transparent,
-        child: SizedBox(width: 1, height: 1),
-      );
+      return const SizedBox(width: 1, height: 1);
     }
     
     bool hasTarget = (_targetPackage != null && _targetPackage!.isNotEmpty && !_hideTargetAppBtn);
     bool hasSecondTarget = (_secondTargetPackage != null && _secondTargetPackage!.isNotEmpty && !_hideSecondAppBtn);
     bool showMainBtn = !_hideMainAppBtn;
 
+    // Khoảng đệm cố định, vì lúc này chiều cao nút không nhảy vọt khi mở Reset
     double topPadding = 4.0;
 
     return Material(
@@ -426,186 +479,181 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Container(
-                  width: _isShrunk ? 15 : 100, // THU NHỎ XUỐNG 15
-                  height: _isShrunk ? 15 : null, // THU NHỎ XUỐNG 15
+                  width: _isShrunk ? 28 : 85, 
+                  height: _isShrunk ? 28 : null,
                   decoration: BoxDecoration(
-                    color: _flashBgColor, 
+                    color: Colors.transparent, 
                     shape: BoxShape.rectangle,
                     borderRadius: _isShrunk ? null : BorderRadius.circular(20),
                     border: _isShrunk ? null : Border.all(color: Colors.white.withOpacity(_opacity * 0.6), width: 1.5), 
                     boxShadow: _isShrunk ? [] : [BoxShadow(blurRadius: 3, color: Colors.black45.withOpacity(_opacity))], 
                   ),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onLongPress: _isShrunk ? null : _shrinkAndHide,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (!_isShrunk) ...[
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () async {
-                              try {
-                                await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-                                _distFocus.requestFocus();
-                                await Future.delayed(const Duration(milliseconds: 150));
-                                SystemChannels.textInput.invokeMethod('TextInput.show');
-                              } catch (e) {}
-                            },
-                            onLongPress: _shrinkAndHide,
-                            child: Container(
-                              height: 48, 
-                              margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 8), 
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Center(
-                                child: IgnorePointer(
-                                  child: TextField(
-                                    controller: _distCtrl,
-                                    focusNode: _distFocus,
-                                    enableInteractiveSelection: false, 
-                                    contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
-                                    decoration: InputDecoration(
-                                      hintText: "...",
-                                      hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
-                                      border: InputBorder.none,
-                                      isDense: true,
-                                      contentPadding: EdgeInsets.zero,
-                                    ),
-                                    onChanged: (val) async {
-                                      String text = val.toLowerCase();
-                                      
-                                      if (text == '--' || text == '  ') {
-                                         final prefs = await SharedPreferences.getInstance();
-                                         await prefs.reload();
-                                         await prefs.setString('pending_dist', text);
-                                         await prefs.setBool('overlay_is_returning', false);
-                                         await _launchApp(_myPackage);
-                                         _distCtrl.clear();
-                                         _distFocus.unfocus();
-                                         return;
-                                      }
-    
-                                      if (text == '-' || text == ' ') {
-                                          return; 
-                                      }
-                                      
-                                      final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
-                                      bool isCoord = coordRegExp.hasMatch(val.trim());
-    
-                                      if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
-                                        if (val.trim().isNotEmpty) {
-                                          final prefs = await SharedPreferences.getInstance();
-                                          await prefs.reload();
-                                          await prefs.setString('pending_dist', val);
-                                          await prefs.setBool('overlay_is_returning', false);
-                                          
-                                          await _launchApp(_myPackage);
-                                        }
-                                        _distCtrl.clear();
-                                        _distFocus.unfocus();
-                                      }
-                                    },
-                                    onSubmitted: (val) async {
-                                      if (val.isNotEmpty) {
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (!_isShrunk) ...[
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () async {
+                            try {
+                              await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                              _distFocus.requestFocus();
+                              await Future.delayed(const Duration(milliseconds: 150));
+                              SystemChannels.textInput.invokeMethod('TextInput.show');
+                            } catch (e) {}
+                          },
+                          onLongPress: _shrinkAndHide,
+                          child: Container(
+                            height: 42, 
+                            margin: const EdgeInsets.only(top: 8, left: 6, right: 6, bottom: 4), 
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(_opacity == 0.0 ? 0.0 : 0.8),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: IgnorePointer(
+                                child: TextField(
+                                  controller: _distCtrl,
+                                  focusNode: _distFocus,
+                                  enableInteractiveSelection: false, 
+                                  contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(), 
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                  decoration: InputDecoration(
+                                    hintText: "...",
+                                    hintStyle: TextStyle(color: Colors.grey.withOpacity(_opacity == 0.0 ? 0.0 : 1.0)),
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                  onChanged: (val) async {
+                                    String text = val.toLowerCase();
+                                    
+                                    if (text == '--' || text == '  ') {
+                                       final prefs = await SharedPreferences.getInstance();
+                                       await prefs.reload();
+                                       await prefs.setString('pending_dist', text);
+                                       await prefs.setBool('overlay_is_returning', false);
+                                       await _launchApp(_myPackage);
+                                       _distCtrl.clear();
+                                       _distFocus.unfocus();
+                                       return;
+                                    }
+  
+                                    if (text == '-' || text == ' ') {
+                                        return; 
+                                    }
+                                    
+                                    final coordRegExp = RegExp(r'^([-+]?\d+(?:[\.,]\d+)?)\s*[,;\s]+\s*([-+]?\d+(?:[\.,]\d+)?)$');
+                                    bool isCoord = coordRegExp.hasMatch(val.trim());
+  
+                                    if (isCoord || text.contains('-') || text.contains(' ') || text.contains('k') || text.contains('m')) {
+                                      if (val.trim().isNotEmpty) {
                                         final prefs = await SharedPreferences.getInstance();
                                         await prefs.reload();
                                         await prefs.setString('pending_dist', val);
                                         await prefs.setBool('overlay_is_returning', false);
                                         
                                         await _launchApp(_myPackage);
-                                        
-                                        _distCtrl.clear();
                                       }
+                                      _distCtrl.clear();
                                       _distFocus.unfocus();
-                                    },
-                                  ),
+                                    }
+                                  },
+                                  onSubmitted: (val) async {
+                                    if (val.isNotEmpty) {
+                                      final prefs = await SharedPreferences.getInstance();
+                                      await prefs.reload();
+                                      await prefs.setString('pending_dist', val);
+                                      await prefs.setBool('overlay_is_returning', false);
+                                      
+                                      await _launchApp(_myPackage);
+                                      
+                                      _distCtrl.clear();
+                                    }
+                                    _distFocus.unfocus();
+                                  },
                                 ),
                               ),
                             ),
                           ),
-                          
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6.0),
-                            child: Container(width: 75, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)),
-                          ), 
-                        ],
+                        ),
                         
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: _distFocus.hasFocus
-                              ? [
-                                  InkWell(
-                                    onTap: () {
-                                      _distFocus.unfocus();
-                                    },
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0), 
-                                      child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 32),
-                                    ),
-                                  )
-                                ]
-                              : (_isShrunk
-                                  ? [
-                                      _opacity > 0.0
-                                          ? GestureDetector(
-                                              behavior: HitTestBehavior.opaque,
-                                              onTap: () async {
-                                                setState(() {
-                                                  _isShrunk = false;
-                                                });
-                                                final prefs = await SharedPreferences.getInstance();
-                                                double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
-                                                double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
-                                                await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
-                                              },
-                                              onLongPress: _closeOverlayCompletely,
-                                              child: Center(
-                                                child: Padding(
-                                                  padding: const EdgeInsets.all(0.0),
-                                                  // THAY ĐỔI ICON LÀM NÓ NHỎ VÀ TRONG SUỐT HƠN KHI BỊ THU NHỎ
-                                                  child: Icon(
-                                                    Icons.circle, 
-                                                    color: Colors.grey.shade700.withOpacity(_opacity == 0.0 ? 0.0 : 0.3), 
-                                                    size: 12,
-                                                  ),
+                        Container(width: 55, height: 1, color: Colors.white.withOpacity(_opacity * 0.6)), 
+                      ],
+                      
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: _distFocus.hasFocus
+                            ? [
+                                InkWell(
+                                  onTap: () {
+                                    _distFocus.unfocus();
+                                  },
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0), 
+                                    child: Icon(Icons.keyboard_hide, color: Colors.white.withOpacity(_opacity), size: 26),
+                                  ),
+                                )
+                              ]
+                            : (_isShrunk
+                                ? [
+                                    _opacity > 0.0
+                                        ? GestureDetector(
+                                            behavior: HitTestBehavior.opaque,
+                                            onTap: () async {
+                                              setState(() {
+                                                _isShrunk = false;
+                                              });
+                                              final prefs = await SharedPreferences.getInstance();
+                                              double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+                                              double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+                                              await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+                                            },
+                                            onLongPress: _closeOverlayCompletely,
+                                            child: Center(
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(0.0),
+                                                child: Icon(
+                                                  Icons.layers, 
+                                                  color: Colors.grey.shade700.withOpacity(_opacity == 0.0 ? 0.0 : 0.6), 
+                                                  size: 16,
                                                 ),
                                               ),
-                                            )
-                                          : const SizedBox.shrink(),
-                                    ]
-                                  : [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                        children: [
-                                          if (_showResetBtn && !_distFocus.hasFocus) _buildResetButton(),
-                                          if (showMainBtn) _buildMainAppButton(),
-                                        ],
-                                      ),
-                                      if ((showMainBtn || (_showResetBtn && !_distFocus.hasFocus)) && (hasTarget || hasSecondTarget))
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(vertical: 6.0),
-                                          child: Container(width: 65, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)),
-                                        ), 
-                                      if (hasTarget || hasSecondTarget)
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                          children: [
-                                            if (hasTarget) _buildTargetAppButton(),
-                                            if (hasSecondTarget) _buildSecondTargetAppButton(),
-                                          ],
-                                        ),
-                                    ]),
-                        ),
-                      ],
-                    ),
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ]
+                                : [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                      children: [
+                                        if (showMainBtn) _buildMainAppButton(),
+                                        if (_showResetBtn) 
+                                          _buildResetButton()
+                                        else if (showMainBtn) 
+                                          const SizedBox(width: 38, height: 50), // Khoảng trống giữ chỗ để giao diện không nhảy
+                                      ],
+                                    ),
+                                    if (showMainBtn && (hasTarget || hasSecondTarget))
+                                      Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                    if (hasTarget) ...[
+                                      if (showMainBtn) const SizedBox(height: 4),
+                                      _buildTargetAppButton(),
+                                    ],
+                                    if (hasSecondTarget) ...[
+                                      if (showMainBtn || hasTarget) ...[
+                                        Container(width: 45, height: 1, color: Colors.white.withOpacity(_opacity * 0.3)), 
+                                        const SizedBox(height: 4),
+                                      ],
+                                      _buildSecondTargetAppButton(),
+                                    ],
+                                  ]),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -742,6 +790,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
 
   int? _lastFocusedIndex;
 
+  // HÀM ĐỒNG BỘ NÚT RESET
+  // Chỉ báo bật nút màu cam khi ứng dụng đang chạy Mốc 3 (selectedIndex == 2)
   Future<void> _syncOverlayState() async {
     bool shouldShow = (selectedIndex == 2);
     final prefs = await SharedPreferences.getInstance();
@@ -1023,7 +1073,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       _showMsg("Đã dán tọa độ và chạy Mốc 1!");
       _syncOverlayState();
       _requestFocus(0); 
-      await _switchToTargetApp(delayMs: 600); 
+      await _switchToTargetApp(delayMs: 600); // Tăng thời gian chờ riêng cho hành động dán tọa độ
       return;
     }
 
@@ -1881,8 +1931,8 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       visibility: NotificationVisibility.visibilitySecret,
       alignment: OverlayAlignment.centerLeft, 
       positionGravity: PositionGravity.none,
-      height: 460, // Đã giảm nhẹ chiều cao để bớt dài
-      width: 115,   
+      height: 450, 
+      width: 95,   
       startPosition: OverlayPosition(startX, startY),
     );
     setState(() => _isOverlayActive = true);
@@ -4236,4 +4286,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} ///
