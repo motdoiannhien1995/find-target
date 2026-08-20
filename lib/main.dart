@@ -394,6 +394,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     return Material(
       color: Colors.transparent,
       child: Listener(
+        behavior: HitTestBehavior.translucent, // Thêm thuộc tính này để bắt sự kiện xuyên suốt
         onPointerMove: (_) {
           if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
             setState(() {
@@ -417,8 +418,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
             await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
           }
         },
+        onPointerCancel: (_) async { // Đảm bảo bắt sự kiện khi Android kết thúc kéo cửa sổ
+          if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
+            final prefs = await SharedPreferences.getInstance();
+            double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+            double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+            await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+          }
+        },
         child: GestureDetector(
-          behavior: HitTestBehavior.deferToChild,
+          behavior: HitTestBehavior.translucent, // Thêm thuộc tính này
           child: Align(
             alignment: Alignment.topCenter,
             child: Padding(
@@ -426,8 +435,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Container(
-                  width: _isShrunk ? 15 : 100, // THU NHỎ XUỐNG 15
-                  height: _isShrunk ? 15 : null, // THU NHỎ XUỐNG 15
+                  width: _isShrunk ? 24 : 100, // THU NHỎ XUỐNG 24
+                  height: _isShrunk ? 24 : null, // THU NHỎ XUỐNG 24
                   decoration: BoxDecoration(
                     color: _flashBgColor, 
                     shape: BoxShape.rectangle,
@@ -573,8 +582,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                                   // THAY ĐỔI ICON LÀM NÓ NHỎ VÀ TRONG SUỐT HƠN KHI BỊ THU NHỎ
                                                   child: Icon(
                                                     Icons.circle, 
-                                                    color: Colors.grey.shade700.withOpacity(_opacity == 0.0 ? 0.0 : 0.3), 
-                                                    size: 12,
+                                                    color: Colors.grey.shade800.withOpacity(_opacity == 0.0 ? 0.0 : 0.6), 
+                                                    size: 18,
                                                   ),
                                                 ),
                                               ),
@@ -4236,4 +4245,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} // không vuốt di chuyển dưới nhưng vẫn kéo
