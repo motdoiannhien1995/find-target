@@ -59,11 +59,16 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   bool _isShrunkFixed = false; 
   bool _isGhostMode = false; 
 
-  // Các biến cấu hình ẩn/hiện từng nút
+  // Các biến cấu hình ẩn/hiện từng nút và thao tác
   bool _hideMainAppBtn = false;
   bool _hideTargetAppBtn = false;
   bool _hideSecondAppBtn = false;
-  bool _showResetBtn = false; // Trạng thái hiển thị nút reset
+  bool _showResetBtn = false; 
+  bool _hideOnDrag = false; 
+  bool _longPressToShrink = false; 
+  bool _autoShrink = false; 
+
+  Timer? _inactivityTimer;
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
@@ -74,7 +79,10 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     _loadTargetFromDisk();
     
     _distFocus.addListener(() {
-      if (mounted) setState(() {}); 
+      if (mounted) {
+        setState(() {});
+        _resetTimer();
+      }
       if (_distFocus.hasFocus) {
         FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
       } else {
@@ -93,6 +101,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
 
       if (event == 'update_packages') {
         await _loadTargetFromDisk();
+        _resetTimer();
         if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
@@ -118,6 +127,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           if (!_isLockPositionMode) _isShrunk = false;
           _opacity = 0.85;
         });
+        _resetTimer();
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
           if (!_isLockPositionMode) {
@@ -134,6 +144,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           if (!_isLockPositionMode) _isShrunk = false;
           _opacity = 0.85;
         });
+        _resetTimer();
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
           if (!_isLockPositionMode) {
@@ -151,6 +162,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           _isLockPositionMode = true; 
           _opacity = 0.85;
         });
+        _resetTimer();
         try {
           await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
         } catch (e) {}
@@ -158,15 +170,29 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         setState(() {
           _isLockPositionMode = false; 
         });
+        _resetTimer();
       }
     });
   }
 
   @override
   void dispose() {
+    _inactivityTimer?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
+  }
+
+  // Khởi động lại bộ đếm 9s
+  void _resetTimer() {
+    _inactivityTimer?.cancel();
+    if (_autoShrink && !_isShrunk && !_isLockPositionMode && !_isGhostMode && !_distFocus.hasFocus) {
+      _inactivityTimer = Timer(const Duration(seconds: 9), () {
+        if (mounted && !_isShrunk) {
+          _shrinkToIcon();
+        }
+      });
+    }
   }
 
   // Hàm hiệu ứng chớp nền tạm thời
@@ -227,9 +253,11 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
      }
   }
 
+  // Hành động ẩn tàng hình
   Future<void> _shrinkAndHide() async {
     if (_isLockPositionMode) return; 
     _distFocus.unfocus();
+    _inactivityTimer?.cancel();
     setState(() {
       _isShrunk = true;
       _opacity = 0.0;
@@ -246,8 +274,38 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     _saveHistoryFromOverlay();
   }
 
+  // Hành động thu nhỏ (không tàng hình)
+  Future<void> _shrinkToIcon() async {
+    if (_isLockPositionMode) return;
+    _distFocus.unfocus();
+    _inactivityTimer?.cancel();
+    setState(() {
+      _isShrunk = true;
+      _opacity = 0.85; 
+    });
+    _saveHistoryFromOverlay();
+    try {
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      if (_isShrunkFixed) {
+        final prefs = await SharedPreferences.getInstance();
+        double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+        double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+        await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+      }
+    } catch (e) {}
+  }
+
+  void _handleLongPress() {
+    if (_longPressToShrink) {
+      _shrinkToIcon();
+    } else {
+      _shrinkAndHide();
+    }
+  }
+
   Future<void> _closeOverlayCompletely() async {
     _distFocus.unfocus();
+    _inactivityTimer?.cancel();
     _saveHistoryFromOverlay();
     setState(() {
       _isGhostMode = true;
@@ -256,7 +314,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     });
     try {
       await FlutterOverlayWindow.updateFlag(OverlayFlag.clickThrough);
-      // GIỮ NGUYÊN TỌA ĐỘ TRÊN MÀN HÌNH - KHÔNG NÉM RA -9999 ĐỂ TRÁNH BỊ HỆ THỐNG KILL APP
       FlutterOverlayWindow.shareData('ghost_mode_active');
     } catch (e) {}
   }
@@ -274,6 +331,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _hideTargetAppBtn = prefs.getBool('hide_target_app_btn') ?? false;
         _hideSecondAppBtn = prefs.getBool('hide_second_app_btn') ?? false;
         _showResetBtn = prefs.getBool('show_reset_btn') ?? false;
+        _hideOnDrag = prefs.getBool('hide_on_drag') ?? false;
+        _longPressToShrink = prefs.getBool('long_press_to_shrink') ?? false;
+        _autoShrink = prefs.getBool('auto_shrink_9s') ?? false;
       });
     } catch (e) {
       print("Overlay lỗi đọc disk");
@@ -308,7 +368,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _handleLongPress,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
@@ -323,7 +383,6 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _distFocus.unfocus();
         _triggerFlash(Colors.cyan.shade700);
         
-        // Gửi cờ yêu cầu app chính tự mở lên và đọc clipboard (vượt qua giới hạn chạy ngầm của Android)
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         await prefs.setBool('pending_paste_from_overlay', true);
@@ -331,7 +390,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         
         await _launchApp(_myPackage);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _handleLongPress,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
@@ -349,7 +408,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await prefs.setBool('overlay_is_returning', false);
         await _launchApp(_myPackage);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _handleLongPress,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
@@ -370,7 +429,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         await prefs.setBool('overlay_is_returning', true);
         await _launchApp(_targetPackage!);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _handleLongPress,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
@@ -389,7 +448,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
         _triggerFlash(Colors.deepOrange);
         await _launchApp(_secondTargetPackage!);
       },
-      onLongPress: _shrinkAndHide,
+      onLongPress: _handleLongPress,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 14.0), 
@@ -417,23 +476,9 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
       color: Colors.transparent,
       child: Listener(
         behavior: HitTestBehavior.translucent, 
-        onPointerMove: (_) {
-          if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
-            setState(() {
-              _isShrunk = true;
-            });
-            _saveHistoryFromOverlay();
-          }
-
-          if (_isShrunkFixed && !_isLockPositionMode) {
-            SharedPreferences.getInstance().then((prefs) {
-              double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
-              double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
-              FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
-            });
-          }
-        },
+        onPointerDown: (_) => _resetTimer(),
         onPointerUp: (_) async {
+          _resetTimer();
           if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
@@ -442,11 +487,30 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
           }
         },
         onPointerCancel: (_) async { 
+          _resetTimer();
           if (_isShrunk && _isShrunkFixed && !_isLockPositionMode) {
             final prefs = await SharedPreferences.getInstance();
             double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
             double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
             await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+          }
+        },
+        onPointerMove: (_) {
+          _resetTimer();
+          if (!_isShrunk && !_distFocus.hasFocus && !_isLockPositionMode) {
+            if (_hideOnDrag) {
+               _shrinkAndHide();
+            } else {
+               _shrinkToIcon();
+            }
+          }
+
+          if (_isShrunkFixed && !_isLockPositionMode) {
+            SharedPreferences.getInstance().then((prefs) {
+              double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+              double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+              FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+            });
           }
         },
         child: GestureDetector(
@@ -469,7 +533,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                   ),
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onLongPress: _isShrunk ? null : _shrinkAndHide,
+                    onLongPress: _isShrunk ? null : _handleLongPress,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -485,7 +549,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                 SystemChannels.textInput.invokeMethod('TextInput.show');
                               } catch (e) {}
                             },
-                            onLongPress: _shrinkAndHide,
+                            onLongPress: _handleLongPress,
                             child: Container(
                               height: 48, 
                               margin: const EdgeInsets.only(top: 10, left: 8, right: 8, bottom: 8), 
@@ -593,6 +657,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                                 setState(() {
                                                   _isShrunk = false;
                                                 });
+                                                _resetTimer();
                                                 final prefs = await SharedPreferences.getInstance();
                                                 double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
                                                 double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
@@ -1427,18 +1492,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     if (!status) await FlutterOverlayWindow.requestPermission();
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _serviceStatusStreamSubscription?.cancel();
-    _overlaySubscription?.cancel();
-    _resetSwitchTimer?.cancel(); 
-    _mapController.dispose();
-    _searchCtrl.dispose();
-    for (var b in beacons) b.dispose();
-    super.dispose();
-  }
-
   // Cấu hình linh hoạt thời gian chờ trước khi sang app liên kết
   Future<void> _switchToTargetApp({int delayMs = 50}) async {
     if (targetAppPackage == null || targetAppPackage!.isEmpty) return;
@@ -1529,7 +1582,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           });
         }
 
-        // --- MỚI THÊM: Xử lý dán Clipboard khi app vừa từ nút nổi quay về ---
         bool pendingPaste = prefs.getBool('pending_paste_from_overlay') ?? false;
         if (pendingPaste) {
           await prefs.setBool('pending_paste_from_overlay', false);
@@ -1995,10 +2047,13 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     _showMsg("Đã HỦY thay đổi vị trí.");
   }
 
-  // Hộp thoại cài đặt tùy chọn ẩn từng nút riêng lẻ
+  // Hộp thoại cài đặt tùy chọn nút nổi
   void _showOverlaySettingsDialog() async {
     final prefs = await SharedPreferences.getInstance();
     bool isShrunkFixed = prefs.getBool('shrunk_is_fixed') ?? false;
+    bool hideOnDrag = prefs.getBool('hide_on_drag') ?? false;
+    bool longPressToShrink = prefs.getBool('long_press_to_shrink') ?? false;
+    bool autoShrink = prefs.getBool('auto_shrink_9s') ?? false;
     bool hideMainAppBtn = prefs.getBool('hide_main_app_btn') ?? false;
     bool hideTargetAppBtn = prefs.getBool('hide_target_app_btn') ?? false;
     bool hideSecondAppBtn = prefs.getBool('hide_second_app_btn') ?? false;
@@ -2023,6 +2078,43 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
                     onChanged: (val) async {
                       setDialogState(() => isShrunkFixed = val);
                       await prefs.setBool('shrunk_is_fixed', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Kéo để ẩn hoàn toàn", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Kéo nút sẽ ẩn tàng hình thay vì thu nhỏ.", style: TextStyle(fontSize: 12)),
+                    value: hideOnDrag,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => hideOnDrag = val);
+                      await prefs.setBool('hide_on_drag', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Nhấn giữ để thu nhỏ", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Nhấn giữ nút sẽ thu nhỏ thay vì ẩn tàng hình.", style: TextStyle(fontSize: 12)),
+                    value: longPressToShrink,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => longPressToShrink = val);
+                      await prefs.setBool('long_press_to_shrink', val);
+                      FlutterOverlayWindow.shareData('update_packages'); 
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Tự động thu nhỏ sau 9s", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Tự động thu nhỏ nếu không tương tác.", style: TextStyle(fontSize: 12)),
+                    value: autoShrink,
+                    activeColor: Colors.blue,
+                    onChanged: (val) async {
+                      setDialogState(() => autoShrink = val);
+                      await prefs.setBool('auto_shrink_9s', val);
                       FlutterOverlayWindow.shareData('update_packages'); 
                     },
                   ),
