@@ -28,6 +28,7 @@ import 'package:android_id/android_id.dart';
 
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
+import 'package:sensors_plus/sensors_plus.dart'; 
 
 @pragma("vm:entry-point")
 void overlayMain() {
@@ -69,6 +70,8 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   bool _autoShrink = false; 
 
   Timer? _inactivityTimer;
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+  DateTime? _lastShakeTime;
 
   final TextEditingController _distCtrl = TextEditingController();
   final FocusNode _distFocus = FocusNode();
@@ -78,6 +81,22 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
     super.initState();
     _loadTargetFromDisk();
     
+    // Lắng nghe sự kiện lắc máy để mở rộng nút nổi
+    _accelSub = accelerometerEventStream().listen((AccelerometerEvent event) {
+      double g = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+      // Ngưỡng 25.0 tương đương với một cú lắc mạnh
+      if (g > 25.0) {
+        final now = DateTime.now();
+        // Chống dội (debounce) 2 giây để không bị kích hoạt liên tục
+        if (_lastShakeTime == null || now.difference(_lastShakeTime!) > const Duration(seconds: 2)) {
+          _lastShakeTime = now;
+          if (mounted && (_opacity == 0.0 || _isShrunk)) {
+            _expandOverlay(); // Mở rộng nút ra thay vì thu nhỏ
+          }
+        }
+      }
+    });
+
     _distFocus.addListener(() {
       if (mounted) {
         setState(() {});
@@ -178,6 +197,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
   @override
   void dispose() {
     _inactivityTimer?.cancel();
+    _accelSub?.cancel();
     _distCtrl.dispose();
     _distFocus.dispose();
     super.dispose();
@@ -251,6 +271,29 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
      } catch (e) {
          print("Lỗi lưu history từ overlay: $e");
      }
+  }
+
+  // Hành động mở rộng nút ra
+  Future<void> _expandOverlay() async {
+    if (_isLockPositionMode) return;
+    _distFocus.unfocus();
+    _inactivityTimer?.cancel();
+    setState(() {
+      _isGhostMode = false;
+      _isShrunk = false; // Phóng to ra
+      _opacity = 0.85; 
+    });
+    _saveHistoryFromOverlay();
+    try {
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      if (_isShrunkFixed) {
+        final prefs = await SharedPreferences.getInstance();
+        double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
+        double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
+        await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+      }
+    } catch (e) {}
+    _resetTimer();
   }
 
   // Hành động ẩn tàng hình
@@ -654,14 +697,7 @@ class _InvincibleOverlayState extends State<InvincibleOverlay> {
                                           ? GestureDetector(
                                               behavior: HitTestBehavior.opaque,
                                               onTap: () async {
-                                                setState(() {
-                                                  _isShrunk = false;
-                                                });
-                                                _resetTimer();
-                                                final prefs = await SharedPreferences.getInstance();
-                                                double fixedX = prefs.getDouble('custom_fixed_x') ?? 0.0;
-                                                double fixedY = prefs.getDouble('custom_fixed_y') ?? 0.0;
-                                                await FlutterOverlayWindow.moveOverlay(OverlayPosition(fixedX, fixedY));
+                                                _expandOverlay();
                                               },
                                               onLongPress: _closeOverlayCompletely,
                                               child: Center(
@@ -859,7 +895,6 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this); 
     _checkStatus(); 
-    _loadData(); 
     _requestOverlayPermission();
     
     FlutterOverlayWindow.isActive().then((val) {
@@ -906,6 +941,7 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
         prefs.remove('current_playing_target');
       });
       _syncOverlayState(); 
+      await _loadData(); // Load data có await để đảm bảo có historyTargets
       await _initLocation();
       
       _serviceStatusStreamSubscription = Geolocator.getServiceStatusStream().listen((ServiceStatus status) {
@@ -922,6 +958,11 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       bool isGranted = await platform.invokeMethod('checkMockPermission');
       if (!isGranted) {
         _showMockPermissionDialog();
+      } else {
+        // Tự động play vị trí mới nhất trong lịch sử nếu chưa có mốc nào
+        if (historyTargets.isNotEmpty && selectedIndex == null && !isMockingTarget) {
+          await _assignSavedTargetToP(historyTargets.first.location);
+        }
       }
     });
   }
@@ -1564,6 +1605,14 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
           if (mounted) {
             setState(() { historyTargets = List<SavedTarget>.from(l.map((model) => SavedTarget.fromJson(model))); });
           }
+        }
+
+        // Tự động chạy mock nếu chưa có mock nào chạy khi mở lại app
+        bool isGranted = await platform.invokeMethod('checkMockPermission');
+        if (isGranted && historyTargets.isNotEmpty && selectedIndex == null && !isMockingTarget) {
+           if (mounted) {
+             await _assignSavedTargetToP(historyTargets.first.location);
+           }
         }
 
         bool pendingReset = prefs.getBool('pending_reset') ?? false;
@@ -4378,4 +4427,4 @@ class _MockAppState extends State<MockApp> with WidgetsBindingObserver {
       ),
     );
   }
-}
+} /// lắc

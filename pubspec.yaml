@@ -20,11 +20,10 @@ dependencies:
   url_launcher: ^6.3.2
   http: ^1.1.0
 
-  # --- BỘ THƯ VIỆN CACHE (ĐÃ CHỈNH VERSION ĐỂ KHỚP NHAU) ---
+  # --- BỘ THƯ VIỆN CACHE ---
   flutter_map_cache: ^1.5.2  
   dio: ^5.3.0                
   dio_cache_interceptor: ^3.5.1 
-  # 👇 Đã hạ xuống 1.2.3 theo yêu cầu của Flutter 👇
   dio_cache_interceptor_file_store: ^1.2.3
   path_provider: ^2.1.5      
 
@@ -40,8 +39,11 @@ dependencies:
   screenshot: ^3.0.0
   gal: ^2.3.2
 
-  change_app_package_name: ^1.1.0  # Thêm dòng này và
+  change_app_package_name: ^1.1.0
   tutorial_coach_mark: ^1.2.9
+
+  # 👇 Đã nâng cấp version theo yêu cầu của Flutter 👇
+  sensors_plus: ^7.1.0
 
 dev_dependencies:
   flutter_test:
